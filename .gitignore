@@ -7,3 +7,4 @@ tests/bionic-gpt_6a82275_web_server_llvm20.ll
 tests/hub_e1be468_bin.ll
 tests/hub_e1be468_lib.ll
 .vscode/
+MINE.md

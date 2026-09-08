@@ -1,6 +1,7 @@
 # static taint analysis (library usage)
 
-The static taint analysis is the AFG static stage exposed as a Rust library.
+The static taint analysis is **not** the classical single tainted/untainted bit model that [`llvm-ir-taint`](https://github.com/cdisselkoen/llvm-ir-taint) implements. It is the AFG static stage exposed as a Rust library. 
+
 Given one or more LLVM IR modules and the LLM/AC signature catalogs, it builds
 the pointer assignment graph in `afg` mode and returns a `TaintAnalysis`: the
 semantic points it found (auth checks, LLM calls, prompts), the principal
@@ -10,6 +11,26 @@ and its source location.
 The canonical consumer is `afg_prototype` (`src/main.rs`, `run_pag_and_afg`),
 which turns this output into an instrumentation plan. Read that alongside this
 doc for a full, working example.
+
+## Relationship to `llvm-ir-taint`
+
+In short: `llvm-ir-taint` answers "is this value tainted?" with an
+instruction-level dataflow analysis; RAIL's `taint_analysis` answers "which
+authenticated user's data can reach this point?" as a downstream consumer of
+the PAG, with an entirely different data model. No types, functions, or files
+were copied from `llvm-ir-taint`.
+
+
+| | `llvm-ir-taint` | RAIL's `taint_analysis` |
+|---|---|---|
+| what's tracked | a `TaintedType` lattice (tainted/untainted, with pointee/struct shape) per SSA value | a set of `PAContextElem::Principal { auth_callsite }` per PAG node — *which auth call site's data reaches this node* |
+| when it runs | its own forward abstract-interpretation pass, walking LLVM instructions directly (`Load`, `Store`, `GEP`, `BinaryOp`, `Select`, `BitCast`, ...) | after the pointer assignment graph (PAG) has already reached its points-to fixed point; it propagates over PAG nodes/edges, never touches LLVM instructions |
+| fixed-point driver | a per-function `Worklist` re-processing functions as taint info changes | graph propagation from each `SemanticPoint` (access-control hit), plus `propagate_return_to_callers` to carry an authenticated principal back across call returns |
+| what a "positive" means | a value is reachable from a tainted source | a node is reachable from **two or more** distinct principals — a static candidate for a cross-user leak |
+| domain vocabulary | `TaintedType`, `TaintState`, `FunctionSummary`, `NamedStructs`, `Pointee`, `Config` | `PAContext`, `PAContextElem`, `SemanticPoint`, `SemanticPointKind` (`AccessControl`, `LlmCall`, `LlmPrompt`, ...), tied to the LLM-API/access-control signature catalogs |
+| scope | generic taint propagation for any LLVM program, given a source/sink config | purpose-built for AFG: matching LLM-API and access-control call sites via the JSON catalogs, then asking "do two auth principals overlap on the same data" |
+
+
 
 ## Add it as a dependency
 
