@@ -275,3 +275,12 @@ varying degrees:
 - `src/util.rs` — CLI flag/file helpers
 - `src/main.rs` — the CLI itself
 - everything under `signatures/`, `examples/`, `tests/`
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+The portions listed above as copied or adapted from `llvm-ir-analysis`
+(Copyright (c) 2020 Craig Disselkoen, also MIT) carry that project's copyright
+notice in addition to this repo's, per the MIT license's notice-preservation
+requirement.
