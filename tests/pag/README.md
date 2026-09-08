@@ -1,6 +1,6 @@
 # PAG tests
 
-Small hand-written .ll fixtures for ll_parser's pointer analysis. Two groups:
+Small hand-written .ll fixtures for rail_rs's pointer analysis. Two groups:
 `basic/` (points-to semantics, same answer in every mode) and `context/` (the
 kcfa vs insensitive behaviour). Each .ll also has its expected answer in the
 header comment. This file is how to run them and what to expect.
@@ -14,7 +14,7 @@ header comment. This file is how to run them and what to expect.
 
 ## Why the fixtures look like Rust IR
 
-ll_parser was built for Rust-compiled IR, so the fixtures imitate it:
+rail_rs was built for Rust-compiled IR, so the fixtures imitate it:
 
 - Opaque pointers (`ptr`), llvm-19. Not the old `i32*` form.
 - Rust-legacy-mangled names. Two things the source needs:
@@ -33,11 +33,11 @@ Mode is a CLI flag, no rebuild needed:
 
 ```bash
 # kcfa, k=1
-./target/debug/ll_parser tests/pag/context/identity_return.ll --pag=kcfa --k=1
+./target/debug/rail_rs tests/pag/context/identity_return.ll --pag=kcfa --k=1
 # insensitive
-./target/debug/ll_parser tests/pag/context/identity_return.ll --pag=insensitive
+./target/debug/rail_rs tests/pag/context/identity_return.ll --pag=insensitive
 # afg mode (loads catalogs, records context points)
-./target/debug/ll_parser <in.ll> --pag=afg --api=signatures/llm_api_functions.json --ac=signatures/ac_functions.json
+./target/debug/rail_rs <in.ll> --pag=afg --api=signatures/llm_api_functions.json --ac=signatures/ac_functions.json
 cat points_to.txt
 ```
 

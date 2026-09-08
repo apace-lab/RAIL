@@ -1,7 +1,8 @@
 [package]
-name = "ll_parser"
+name = "rail-rs"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/apace-lab/RAIL.git"
 
 [dependencies]
 llvm-ir = { version = "0.11", features = ["llvm-19"] }

@@ -13,15 +13,15 @@ doc for a full, working example.
 
 ## Add it as a dependency
 
-The taint analysis lives in this crate (`ll_parser`). Depend on it by path:
+The taint analysis lives in this crate (`rail_rs`). Depend on it by path:
 
 ```toml
 # Cargo.toml
 [dependencies]
-ll_parser = { path = "../ll_parser" }
+rail_rs = { path = "../rail_rs" }
 ```
 
-Building against `ll_parser` needs LLVM 19 on the machine (same as the CLI):
+Building against `rail_rs` needs LLVM 19 on the machine (same as the CLI):
 
 ```bash
 export LLVM_SYS_191_PREFIX=/opt/homebrew/opt/llvm@19   # or your llvm@19 prefix
@@ -33,16 +33,16 @@ export LLVM_SYS_191_PREFIX=/opt/homebrew/opt/llvm@19   # or your llvm@19 prefix
 use std::path::Path;
 
 fn main() -> anyhow::Result<()> {
-    // 1) Parse the LLVM IR module(s). `llvm_ir` is re-exported by ll_parser.
-    let module = ll_parser::llvm_ir::Module::from_ir_path(Path::new("app.ll"))
+    // 1) Parse the LLVM IR module(s). `llvm_ir` is re-exported by rail_rs.
+    let module = rail_rs::llvm_ir::Module::from_ir_path(Path::new("app.ll"))
         .map_err(|e| anyhow::anyhow!("parse failed: {e}"))?;
     let modules = [module];
-    let mut analysis = ll_parser::CrossModuleAnalysis::new(modules.iter());
+    let mut analysis = rail_rs::CrossModuleAnalysis::new(modules.iter());
 
     // 2) Load the catalogs and attach them, so the PAG records LLM/AC points.
-    let llm = ll_parser::signature::load_signatures(Path::new("signatures/llm_api_functions.json"))
+    let llm = rail_rs::signature::load_signatures(Path::new("signatures/llm_api_functions.json"))
         .map_err(|e| anyhow::anyhow!("llm catalog: {e}"))?;
-    let ac = ll_parser::signature::load_signatures(Path::new("signatures/ac_functions.json"))
+    let ac = rail_rs::signature::load_signatures(Path::new("signatures/ac_functions.json"))
         .map_err(|e| anyhow::anyhow!("ac catalog: {e}"))?;
     analysis.set_context_catalogs(llm, ac);
 
@@ -88,7 +88,7 @@ analysis), so hold it like a shared borrow and read its fields directly.
 (`LlmCall` also carries an optional `provider`):
 
 ```rust
-use ll_parser::taint_analysis::SemanticPointKind;
+use rail_rs::taint_analysis::SemanticPointKind;
 
 for point in taint.semantic_points.iter() {
     match &point.kind {
@@ -110,7 +110,7 @@ A **principal** is keyed by the **auth call site** it flows from, not by a runti
 user:
 
 ```rust
-use ll_parser::PAContextElem;
+use rail_rs::PAContextElem;
 
 // A node reached by two or more distinct auth call sites is a static
 // cross-user overlap candidate.
@@ -157,10 +157,10 @@ just two parsed modules:
 
 ```rust
 let modules = [
-    ll_parser::llvm_ir::Module::from_ir_path(Path::new("app_lib.ll")).unwrap(),
-    ll_parser::llvm_ir::Module::from_ir_path(Path::new("app_bin.ll")).unwrap(),
+    rail_rs::llvm_ir::Module::from_ir_path(Path::new("app_lib.ll")).unwrap(),
+    rail_rs::llvm_ir::Module::from_ir_path(Path::new("app_bin.ll")).unwrap(),
 ];
-let mut analysis = ll_parser::CrossModuleAnalysis::new(modules.iter());
+let mut analysis = rail_rs::CrossModuleAnalysis::new(modules.iter());
 ```
 
 For a single crate, `ModuleAnalysis::new(&module)` exposes the same

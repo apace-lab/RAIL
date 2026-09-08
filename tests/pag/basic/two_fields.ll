@@ -2,7 +2,7 @@
 ;   struct Pair { f0: ptr, f1: ptr }
 ;   s.f0 = &a ;  s.f1 = &b
 ;   ra = s.f0 ;  rb = s.f1
-; EXPECTED (ll_parser is field-sensitive):
+; EXPECTED (rail_rs is field-sensitive):
 ;   pts(%ra) = { O_a } ;  pts(%rb) = { O_b }
 ; A field-insensitive analysis would instead give pts(%ra)=pts(%rb)={O_a,O_b}.
 

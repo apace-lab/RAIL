@@ -2,7 +2,7 @@
 ; The alloca %a is itself the address of a stack object O_a.
 ; EXPECTED (both modes): pts(%a) = { O_a }   (the alloca object)
 ;
-; Names are Rust-legacy-mangled into crate "test" so ll_parser's main
+; Names are Rust-legacy-mangled into crate "test" so rail_rs's main
 ; detection (needs "main17h") and app-crate gate (_ZN<len>test) fire.
 
 target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"

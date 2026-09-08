@@ -33,15 +33,15 @@ static model sees a single principal; the dynamic run is what tells them apart.
 
 ```sh
 # 1) compile the example to LLVM IR with debug info
-cd ../ll_parser/examples/mini-chat-service
+cd ../rail_rs/examples/mini-chat-service
 cargo +1.85.0 rustc --bin mini_chat_service -- --emit=llvm-ir -Cdebuginfo=2 -Ccodegen-units=1
 LL=$(ls -t target/debug/deps/mini_chat_service-*.ll | head -1)
 
 # 2) producer -> instrument -> observe(MadSim) -> analyze -> schedule -> replay
 cd ../../../afg_prototype
 LLVM_SYS_191_PREFIX=/opt/homebrew/opt/llvm@19 \
-  ./target/debug/afg --llvm-ir "../ll_parser/examples/mini-chat-service/$LL" \
-  --project ../ll_parser/examples/mini-chat-service \
+  ./target/debug/afg --llvm-ir "../rail_rs/examples/mini-chat-service/$LL" \
+  --project ../rail_rs/examples/mini-chat-service \
   --run-dir /tmp/afg_mini --cargo-cmd run --seeds 1 --replay
 ```
 

@@ -239,20 +239,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
-name = "ll_parser"
-version = "0.1.0"
-dependencies = [
- "either",
- "env_logger",
- "llvm-ir",
- "log",
- "petgraph",
- "rustc-demangle",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "llvm-ir"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -355,6 +341,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfbc457d0c7a0759a614551b11a6409e5951f6c7537be1f1b7682b9ae9230368"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "rail-rs"
+version = "0.1.0"
+dependencies = [
+ "either",
+ "env_logger",
+ "llvm-ir",
+ "log",
+ "petgraph",
+ "rustc-demangle",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

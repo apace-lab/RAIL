@@ -2,8 +2,8 @@ use llvm_ir::Module;
 use std::env;
 use std::error::Error;
 
-use ll_parser::util;
-use ll_parser::{CrossModuleAnalysis, ModuleAnalysis};
+use rail_rs::util;
+use rail_rs::{CrossModuleAnalysis, ModuleAnalysis};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
@@ -93,7 +93,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .expect("--k must be a non-negative integer")
                 });
 
-                let pag: std::cell::Ref<'_, ll_parser::PointerAssignmentGraph<'_>> =
+                let pag: std::cell::Ref<'_, rail_rs::PointerAssignmentGraph<'_>> =
                     analysis.pointer_assignment_graph(mode, k_size);
                 pag.print_pointer_assignment_graph()?;
             }
@@ -117,8 +117,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 if let (Some(llm_api_path), Some(ac_path)) = (llm_api_path, ac_path) {
                     let llm_api =
-                        ll_parser::signature::load_signatures(std::path::Path::new(&llm_api_path))?;
-                    let ac = ll_parser::signature::load_signatures(std::path::Path::new(&ac_path))?;
+                        rail_rs::signature::load_signatures(std::path::Path::new(&llm_api_path))?;
+                    let ac = rail_rs::signature::load_signatures(std::path::Path::new(&ac_path))?;
 
                     println!(
                         "Loaded {} LLM API and {} AC signatures",
@@ -128,7 +128,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                     analysis.set_context_catalogs(llm_api, ac);
 
-                    let pag: std::cell::Ref<'_, ll_parser::PointerAssignmentGraph<'_>> =
+                    let pag: std::cell::Ref<'_, rail_rs::PointerAssignmentGraph<'_>> =
                         analysis.pointer_assignment_graph(mode, None);
                     pag.print_pointer_assignment_graph()?;
 
@@ -143,7 +143,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             _ => {
                 // default
-                let pag: std::cell::Ref<'_, ll_parser::PointerAssignmentGraph<'_>> =
+                let pag: std::cell::Ref<'_, rail_rs::PointerAssignmentGraph<'_>> =
                     analysis.pointer_assignment_graph(mode, None);
                 pag.print_pointer_assignment_graph()?;
             }

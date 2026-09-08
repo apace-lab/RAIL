@@ -12,14 +12,14 @@ static SERIAL: Mutex<()> = Mutex::new(());
 // Run one fixture in a given mode and return the contents of points_to.txt.
 fn run(fixture: &str, mode: &[&str]) -> String {
     let _guard = SERIAL.lock().unwrap();
-    let bin = env!("CARGO_BIN_EXE_ll_parser");
+    let bin = env!("CARGO_BIN_EXE_rail-rs");
     let ok = Command::new(bin)
         .arg(fixture)
         .args(mode)
         .status()
-        .expect("failed to launch ll_parser")
+        .expect("failed to launch rail_rs")
         .success();
-    assert!(ok, "ll_parser exited with failure on {fixture}");
+    assert!(ok, "rail_rs exited with failure on {fixture}");
     std::fs::read_to_string("points_to.txt").expect("no points_to.txt produced")
 }
 
@@ -30,7 +30,10 @@ fn set_after(dump: &str, needle: &str) -> Vec<String> {
     while let Some(line) = lines.next() {
         if line.contains(needle) {
             let set = lines.next().unwrap_or("").trim();
-            let set = set.trim_start_matches("-> ").trim_start_matches('{').trim_end_matches('}');
+            let set = set
+                .trim_start_matches("-> ")
+                .trim_start_matches('{')
+                .trim_end_matches('}');
             let mut ids: Vec<String> = set
                 .split(',')
                 .map(|s| s.trim().to_string())
@@ -58,7 +61,11 @@ fn pts_obj(dump: &str, name: &str) -> Vec<String> {
 #[test]
 fn addr_of() {
     let d = run("tests/pag/basic/addr_of.ll", &["--pag=kcfa", "--k=1"]);
-    assert_eq!(pts(&d, "a").len(), 1, "a should point at exactly its alloca object");
+    assert_eq!(
+        pts(&d, "a").len(),
+        1,
+        "a should point at exactly its alloca object"
+    );
 }
 
 #[test]
@@ -88,31 +95,66 @@ fn two_fields() {
 
 #[test]
 fn identity_return_kcfa_separates() {
-    let d = run("tests/pag/context/identity_return.ll", &["--pag=kcfa", "--k=1"]);
+    let d = run(
+        "tests/pag/context/identity_return.ll",
+        &["--pag=kcfa", "--k=1"],
+    );
     assert_eq!(pts(&d, "p"), pts(&d, "a"), "p = id(&a) should be O_a");
     assert_eq!(pts(&d, "q"), pts(&d, "b"), "q = id(&b) should be O_b");
-    assert_ne!(pts(&d, "p"), pts(&d, "q"), "kcfa must keep the two calls apart");
+    assert_ne!(
+        pts(&d, "p"),
+        pts(&d, "q"),
+        "kcfa must keep the two calls apart"
+    );
 }
 
 #[test]
 fn identity_return_insensitive_merges() {
-    let d = run("tests/pag/context/identity_return.ll", &["--pag=insensitive"]);
-    assert_eq!(pts(&d, "p"), pts(&d, "q"), "insensitive must merge the two calls");
-    assert_eq!(pts(&d, "p").len(), 2, "merged set should hold both O_a and O_b");
+    let d = run(
+        "tests/pag/context/identity_return.ll",
+        &["--pag=insensitive"],
+    );
+    assert_eq!(
+        pts(&d, "p"),
+        pts(&d, "q"),
+        "insensitive must merge the two calls"
+    );
+    assert_eq!(
+        pts(&d, "p").len(),
+        2,
+        "merged set should hold both O_a and O_b"
+    );
 }
 
 #[test]
 fn two_callers_store_reaches_global() {
-    let d = run("tests/pag/context/two_callers_store.ll", &["--pag=kcfa", "--k=1"]);
+    let d = run(
+        "tests/pag/context/two_callers_store.ll",
+        &["--pag=kcfa", "--k=1"],
+    );
     // *param = &g in the shared callee, so both callers' local objects hold O_g.
-    assert!(!pts_obj(&d, "la").is_empty(), "O_la should hold O_g after the store");
-    assert_eq!(pts_obj(&d, "la"), pts_obj(&d, "lb"), "both callers' objects reach the same global g");
+    assert!(
+        !pts_obj(&d, "la").is_empty(),
+        "O_la should hold O_g after the store"
+    );
+    assert_eq!(
+        pts_obj(&d, "la"),
+        pts_obj(&d, "lb"),
+        "both callers' objects reach the same global g"
+    );
 }
 
 #[test]
 fn depth_k1_separates() {
-    let d = run("tests/pag/context/depth_k1_limit.ll", &["--pag=kcfa", "--k=1"]);
+    let d = run(
+        "tests/pag/context/depth_k1_limit.ll",
+        &["--pag=kcfa", "--k=1"],
+    );
     assert_eq!(pts(&d, "p"), pts(&d, "a"));
     assert_eq!(pts(&d, "q"), pts(&d, "b"));
-    assert_ne!(pts(&d, "p"), pts(&d, "q"), "per-context reanalysis should keep p and q apart");
+    assert_ne!(
+        pts(&d, "p"),
+        pts(&d, "q"),
+        "per-context reanalysis should keep p and q apart"
+    );
 }

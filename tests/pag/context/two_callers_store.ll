@@ -1,6 +1,6 @@
 ; two_callers_store.ll : shared callee writes a pointer through its param.
 ; (Same shape as the framework's context_test.ll, but opaque-ptr + mangled so
-;  ll_parser actually analyzes it, and observable via a pointer store.)
+;  rail_rs actually analyzes it, and observable via a pointer store.)
 ;
 ;   fn callee(param) { *param = &g }
 ;   caller_a: la; callee(&la)     ; context ca
