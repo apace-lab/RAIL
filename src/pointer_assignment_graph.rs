@@ -607,7 +607,20 @@ impl<'m> PointerAssignmentGraph<'m> {
             taint_analysis: engine,
         };
 
-        if let Some(main_name) = pag.find_main_function_name() {
+        // An explicit app-crate override wins over main detection: it lets us
+        // analyze a library crate (a framework-dispatched web app with no reachable
+        // main), and avoids the loose main heuristic false-matching a monomorphized
+        // symbol (e.g. one containing "domain17h").
+        let app_override = std::env::var("AFG_APP_CRATE").ok().filter(|s| !s.is_empty());
+        if let Some(app) = app_override {
+            println!("[PAG] AFG_APP_CRATE = {:?}; seeding its functions (app-crate override)", app);
+            pag.app_crate = app.clone();
+            if let Some(main_name) = pag.find_main_function_name() {
+                pag.pending_functions
+                    .push_back((main_name, PAContext::global()));
+            }
+            pag.seed_app_crate_entry_points(&app);
+        } else if let Some(main_name) = pag.find_main_function_name() {
             println!("[PAG] potential main function: {}", main_name);
 
             // Derive the application crate for all policies (used by selective
@@ -634,7 +647,7 @@ impl<'m> PointerAssignmentGraph<'m> {
             let seed_crate = parse_app_crate(&main_name);
             pag.seed_app_crate_entry_points(&seed_crate);
         } else {
-            println!("[PAG] warning: cannot find main function; no constraints discovered");
+            println!("[PAG] warning: cannot find main function (set AFG_APP_CRATE to analyze a library crate); no constraints discovered");
             return pag;
         }
 

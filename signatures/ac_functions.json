@@ -106,7 +106,15 @@
             "return_type": "Result<TokenData<T>, Error>",
             "parameter_type": ["&str", "&DecodingKey", "&Validation"],
             "verified_via": "general-knowledge",
-            "taint_role": "primary JWT verification entry point (signature + claims validation); the actual access-control decision"
+            "taint_role": "primary JWT verification entry point (signature + claims validation); the actual access-control decision. NOTE: this is the crate re-export path; the real symbol is jsonwebtoken::decoding::decode (below), matched at real call sites"
+        },
+        {
+            "fn_name": "jsonwebtoken::decoding::decode",
+            "category": "authentication",
+            "return_type": "Result<TokenData<T>, Error>",
+            "parameter_type": ["&str", "&DecodingKey", "&Validation"],
+            "verified_via": "tabby 21b2904 ee/tabby-webserver/src/jwt.rs (real demangled symbol jsonwebtoken::decoding::decode)",
+            "taint_role": "actual defining module path of jsonwebtoken::decode; this is what appears in demangled call sites"
         },
         {
             "fn_name": "jsonwebtoken::decode_header",
