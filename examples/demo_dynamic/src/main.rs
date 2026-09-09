@@ -175,6 +175,11 @@ fn login(username: &str, password: &str) -> Option<String> {
     }
 }
 
+// Developer-marked accesses to the app's shared cache (not a cataloged call, so
+// the pipeline can't find it): a Write when caching, a Read when serving a hit.
+const CACHE_NODE: u64 = 5000;
+const CACHE_FN: u64 = 424242;
+
 async fn handle(req: Request) -> String {
     // Per-request authentication: decode the bearer token to get the principal.
     let session = match jsonwebtoken::decode(req.token.as_str(), &jsonwebtoken::DecodingKey, &jsonwebtoken::Validation) {
@@ -191,6 +196,8 @@ async fn handle(req: Request) -> String {
     let _ = session.role;
 
     if let Some(entry) = cache().lock().unwrap().get(&req.prompt).cloned() {
+        afg_runtime::afg_monitor!(function = CACHE_FN);
+        afg_runtime::afg_access!(node = CACHE_NODE, kind = afg_runtime::AccessKind::Read, function = CACHE_FN);
         if entry.owner_user_id != session.user_id {
             println!(
                 "[leak] {} served a cached answer owned by {}",
@@ -203,6 +210,8 @@ async fn handle(req: Request) -> String {
     let client = async_openai::Client::new();
     let answer = client.chat().create(&req.prompt);
 
+    afg_runtime::afg_monitor!(function = CACHE_FN);
+    afg_runtime::afg_access!(node = CACHE_NODE, kind = afg_runtime::AccessKind::Write, function = CACHE_FN);
     cache().lock().unwrap().insert(
         req.prompt.clone(),
         CacheEntry {
