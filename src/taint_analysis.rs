@@ -53,6 +53,13 @@ pub enum SemanticPointKind {
         category: String,
         provider: Option<String>,
     },
+
+    /// Read from or write to a shared data store (database, ORM, NoSQL/KV, or a
+    /// cache library). The `category` string is "data-read" or "data-write"; a
+    /// read exposes stored data (the leak direction), a write puts data in.
+    DataAccess {
+        category: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -887,6 +894,25 @@ impl<'m> TaintAnalysis<'m> {
                     for arg in &point.argument_nodes {
                         for principal in &principals {
                             seeds.push((*arg, principal.clone()));
+                        }
+                    }
+                }
+
+                SemanticPointKind::DataAccess { .. } => {
+                    /*
+                     * Shared data store. Seed the principal onto the written data
+                     * (argument_nodes, for a write) and onto the result (for a
+                     * read). Store/Load edges then carry the principal through the
+                     * shared store object, so two principals reaching the same
+                     * store node surface as a cross-user overlap (a write by one
+                     * then a read by another is the leak).
+                     */
+                    for principal in &principals {
+                        for arg in &point.argument_nodes {
+                            seeds.push((*arg, principal.clone()));
+                        }
+                        if let Some(result) = point.result_node {
+                            seeds.push((result, principal.clone()));
                         }
                     }
                 }

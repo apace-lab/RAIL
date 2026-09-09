@@ -277,10 +277,10 @@ pub struct PAConfig {
     /// which functions we apply context-sensitivity on
     pub policy: PAContextSelectPolicy,
     /// together with AFG:
-    /// (llm, access-control) catalogs; when set, matched call sites are recorded
-    /// as context points while the analysis visits calls
+    /// (llm, access-control, data-store) catalogs; when set, matched call sites are
+    /// recorded as context points while the analysis visits calls
     /// default = None
-    pub context_signatures: Option<(Vec<Signature>, Vec<Signature>)>,
+    pub context_signatures: Option<(Vec<Signature>, Vec<Signature>, Vec<Signature>)>,
 }
 
 impl Default for PAConfig {
@@ -341,7 +341,9 @@ impl PAConfig {
         }
     }
 
-    pub fn afg(context_signatures: Option<(Vec<Signature>, Vec<Signature>)>) -> Self {
+    pub fn afg(
+        context_signatures: Option<(Vec<Signature>, Vec<Signature>, Vec<Signature>)>,
+    ) -> Self {
         Self {
             skip_cleanup_blocks: true,
             on_the_fly: true,

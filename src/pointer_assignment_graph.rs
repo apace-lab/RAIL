@@ -516,7 +516,7 @@ impl<'m> PointerAssignmentGraph<'m> {
         functions_by_type: &FunctionsByType<'m>,
         mode: &str,
         k: Option<usize>,
-        context_signatures: Option<(Vec<Signature>, Vec<Signature>)>,
+        context_signatures: Option<(Vec<Signature>, Vec<Signature>, Vec<Signature>)>,
     ) -> Self {
         let start_time: Instant = Instant::now();
 
@@ -2807,8 +2807,15 @@ impl<'m> PointerAssignmentGraph<'m> {
         let matched = (self.config.policy == PAContextSelectPolicy::AFG)
             .then(|| self.config.context_signatures.as_ref())
             .flatten()
-            .and_then(|(llm, ac)| {
-                crate::signature::match_callsite(callee_name, caller_name, block_name, llm, ac)
+            .and_then(|(llm, ac, data)| {
+                crate::signature::match_callsite(
+                    callee_name,
+                    caller_name,
+                    block_name,
+                    llm,
+                    ac,
+                    data,
+                )
             });
 
         // for debugging, print the matched context if any
@@ -2842,8 +2849,7 @@ impl<'m> PointerAssignmentGraph<'m> {
                 }
             }
 
-            // special handling for authentication and llm-api categories
-            // TODO: other categories ??
+            // special handling for authentication, llm-api, and data-store categories
             if let Some(category) = context_point.category.clone() {
                 let kind = match category.as_str() {
                     // access-control decisions
@@ -2859,6 +2865,12 @@ impl<'m> PointerAssignmentGraph<'m> {
                         category,
                         provider: None,
                     }),
+
+                    // shared data-store access (read = leak-exposing, write = the
+                    // stored data); the category string carries the direction.
+                    "data-read" | "data-write" => {
+                        Some(SemanticPointKind::DataAccess { category })
+                    }
 
                     // Unknown category: warn and skip rather than crashing the
                     // analysis, so the evolving catalog can add categories safely.

@@ -20,6 +20,7 @@ pub enum SecurityTag {
     LLMAPIPrompt,
     LLMAPICalls,
     AccessControl,
+    DataAccess,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +126,7 @@ pub fn find_security_points(
     module: &Module,
     llm: &[Signature],
     ac: &[Signature],
+    data: &[Signature],
 ) -> Vec<SecurityPoint> {
     let mut points = Vec::new();
 
@@ -137,7 +139,9 @@ pub fn find_security_points(
             for instr in &block.instrs {
                 if let Instruction::Call(call) = instr {
                     if let Some(callee) = callee_symbol(&call.function) {
-                        if let Some(point) = match_callsite(&callee, caller, &block_name, llm, ac) {
+                        if let Some(point) =
+                            match_callsite(&callee, caller, &block_name, llm, ac, data)
+                        {
                             points.push(point);
                         }
                     }
@@ -146,7 +150,9 @@ pub fn find_security_points(
 
             if let Terminator::Invoke(invoke) = &block.term {
                 if let Some(callee) = callee_symbol(&invoke.function) {
-                    if let Some(point) = match_callsite(&callee, caller, &block_name, llm, ac) {
+                    if let Some(point) =
+                        match_callsite(&callee, caller, &block_name, llm, ac, data)
+                    {
                         points.push(point);
                     }
                 }
@@ -165,14 +171,20 @@ pub fn match_callsite(
     block: &str,
     llm: &[Signature],
     ac: &[Signature],
+    data: &[Signature],
 ) -> Option<SecurityPoint> {
     let demangled = format!("{:#}", demangle(&strip_symbol(callee_mangled)));
     let candidates = candidate_paths(&demangled);
 
+    // Match order: LLM, then access-control, then data-store. First hit wins, so a
+    // symbol claimed by an earlier catalog (e.g. the reqwest::send catch-all) is
+    // attributed there.
     let (kind, (sig, strategy)) = if let Some(hit) = match_any(&candidates, llm) {
         (SecurityTag::LLMAPICalls, hit)
     } else if let Some(hit) = match_any(&candidates, ac) {
         (SecurityTag::AccessControl, hit)
+    } else if let Some(hit) = match_any(&candidates, data) {
+        (SecurityTag::DataAccess, hit)
     } else {
         return None;
     };
@@ -490,5 +502,44 @@ mod tests {
     fn matching_angle_requires_leading_bracket() {
         assert_eq!(matching_angle("app::foo::bar"), None);
         assert!(matching_angle("<a as b>::c").is_some());
+    }
+
+    // ---- data-store catalog ----
+
+    fn sig_cat(fn_name: &str, category: &str) -> Signature {
+        Signature {
+            fn_name: fn_name.to_string(),
+            category: Some(category.to_string()),
+            prompt_arg_index: None,
+            prompt_role: None,
+            result_index: None,
+            request_index: None,
+        }
+    }
+
+    #[test]
+    fn data_access_matches_and_is_tagged() {
+        let data = vec![sig_cat("sqlx::query::Query::fetch_one", "data-read")];
+        // real symbols carry a crate prefix; the short-name (Query::fetch_one) match handles it
+        let point = match_callsite(
+            "app::sqlx_core::query::Query::fetch_one",
+            "caller",
+            "bb0",
+            &[],
+            &[],
+            &data,
+        )
+        .expect("data-store callsite should match");
+        assert_eq!(point.kind, SecurityTag::DataAccess);
+        assert_eq!(point.category.as_deref(), Some("data-read"));
+    }
+
+    #[test]
+    fn earlier_catalog_wins_over_data() {
+        // the same symbol listed in AC and data: AC is checked first, so it wins
+        let ac = vec![sig_cat("x::Store::get", "authentication")];
+        let data = vec![sig_cat("x::Store::get", "data-read")];
+        let point = match_callsite("app::x::Store::get", "c", "bb0", &[], &ac, &data).unwrap();
+        assert_eq!(point.kind, SecurityTag::AccessControl);
     }
 }
