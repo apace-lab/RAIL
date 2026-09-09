@@ -12,7 +12,7 @@ NO hand-written AFG macros. It goes through catalog-matching stubs:
 - `sqlx::query::Query::execute` -> matched as **data-write**
 - `sqlx::query::Query::fetch_one` -> matched as **data-read**
 
-so AFG's producer finds them via `ll_parser/signatures/data_access_functions.json`
+so AFG's producer finds them via `rail-rs/signatures/data_access_functions.json`
 and inserts `afg_access!` itself, with the real PANode. `argon2` is the real
 crate; `jsonwebtoken` and `async_openai` are the same deterministic stand-ins used
 in `demo_dynamic`. The only AFG piece added by hand is `with_afg_context` (per
@@ -22,7 +22,7 @@ request context, which the instrumenter does not yet insert).
 
 ```sh
 # 1) compile the demo to LLVM IR with debug info
-cd ll_parser/examples/demo_data_access
+cd rail-rs/examples/demo_data_access
 cargo +1.85.0 rustc --bin afg_data_demo -- --emit=llvm-ir -Cdebuginfo=2 -Ccodegen-units=1
 LL=$(ls -t target/debug/deps/afg_data_demo-*.ll | head -1)
 
@@ -31,8 +31,8 @@ LL=$(ls -t target/debug/deps/afg_data_demo-*.ll | head -1)
 SIGS=$(cd ../../signatures && pwd)
 cd ../../../afg_prototype
 LLVM_SYS_191_PREFIX=/opt/homebrew/opt/llvm@19 \
-  ./target/debug/afg --llvm-ir "../ll_parser/examples/demo_data_access/$LL" \
-  --project ../ll_parser/examples/demo_data_access \
+  ./target/debug/afg --llvm-ir "../rail-rs/examples/demo_data_access/$LL" \
+  --project ../rail-rs/examples/demo_data_access \
   --llm-api "$SIGS/llm_api_functions.json" \
   --ac "$SIGS/ac_functions.json" \
   --data-access "$SIGS/data_access_functions.json" \
