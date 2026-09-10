@@ -102,6 +102,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // load context catalogs if both are given, so the analysis records context points
                 let llm_api_path_cli = util::get_flag_value(&args, "--api=");
                 let ac_path_cli = util::get_flag_value(&args, "--ac=");
+                let data_path_cli = util::get_flag_value(&args, "--data=");
 
                 let llm_api_path = util::resolve_signature_file(
                     llm_api_path_cli.as_deref(),
@@ -115,18 +116,30 @@ fn main() -> Result<(), Box<dyn Error>> {
                     "access-control signature file",
                 );
 
+                let data_path = util::resolve_signature_file(
+                    data_path_cli.as_deref(),
+                    "data_access_functions.json",
+                    "data-store signature file",
+                );
+
                 if let (Some(llm_api_path), Some(ac_path)) = (llm_api_path, ac_path) {
                     let llm_api =
                         rail_rs::signature::load_signatures(std::path::Path::new(&llm_api_path))?;
                     let ac = rail_rs::signature::load_signatures(std::path::Path::new(&ac_path))?;
+                    // The data-store catalog is optional; fall back to empty.
+                    let data = match data_path {
+                        Some(p) => rail_rs::signature::load_signatures(std::path::Path::new(&p))?,
+                        None => Vec::new(),
+                    };
 
                     println!(
-                        "Loaded {} LLM API and {} AC signatures",
+                        "Loaded {} LLM API, {} AC, and {} data-store signatures",
                         llm_api.len(),
-                        ac.len()
+                        ac.len(),
+                        data.len()
                     );
 
-                    analysis.set_context_catalogs(llm_api, ac);
+                    analysis.set_context_catalogs(llm_api, ac, data);
 
                     let pag: std::cell::Ref<'_, rail_rs::PointerAssignmentGraph<'_>> =
                         analysis.pointer_assignment_graph(mode, None);

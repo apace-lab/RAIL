@@ -48,7 +48,11 @@ pub struct ModuleAnalysis<'m> {
     /// Map from function name to the `FunctionAnalysis` for that function
     fn_analyses: HashMap<&'m str, FunctionAnalysis<'m>>,
     /// optional (llm, access-control) catalogs used to record context points
-    context_catalogs: Option<(Vec<signature::Signature>, Vec<signature::Signature>)>,
+    context_catalogs: Option<(
+        Vec<signature::Signature>,
+        Vec<signature::Signature>,
+        Vec<signature::Signature>,
+    )>,
     /// optional taint analysis for the module, which can be used to detect potential leaks of sensitive information from LLM API calls to access-control sinks
     taint_analysis: SimpleCache<TaintAnalysis<'m>>,
 }
@@ -74,14 +78,16 @@ impl<'m> ModuleAnalysis<'m> {
         }
     }
 
-    /// Provide the (llm, access-control) catalogs so the pointer analysis records
-    /// context points for matched call sites. Call before `pointer_assignment_graph`.
+    /// Provide the (llm, access-control, data-store) catalogs so the pointer
+    /// analysis records context points for matched call sites. Call before
+    /// `pointer_assignment_graph`.
     pub fn set_context_catalogs(
         &mut self,
         llm: Vec<signature::Signature>,
         ac: Vec<signature::Signature>,
+        data: Vec<signature::Signature>,
     ) {
-        self.context_catalogs = Some((llm, ac));
+        self.context_catalogs = Some((llm, ac, data));
     }
 
     /// Get a reference to the `Module` which the `ModuleAnalysis` was created
@@ -165,7 +171,11 @@ pub struct CrossModuleAnalysis<'m> {
     /// Map from module name to the `ModuleAnalysis` for that module
     module_analyses: HashMap<&'m str, ModuleAnalysis<'m>>,
     /// optional (llm, access-control) catalogs used to record context points
-    context_catalogs: Option<(Vec<signature::Signature>, Vec<signature::Signature>)>,
+    context_catalogs: Option<(
+        Vec<signature::Signature>,
+        Vec<signature::Signature>,
+        Vec<signature::Signature>,
+    )>,
     /// optional taint analysis for the module, which can be used to detect potential leaks of sensitive information from LLM API calls to access-control sinks
     taint_analysis: SimpleCache<TaintAnalysis<'m>>,
 }
@@ -193,14 +203,16 @@ impl<'m> CrossModuleAnalysis<'m> {
         }
     }
 
-    /// Provide the (llm, access-control) catalogs so the pointer analysis records
-    /// context points for matched call sites. Call before `pointer_assignment_graph`.
+    /// Provide the (llm, access-control, data-store) catalogs so the pointer
+    /// analysis records context points for matched call sites. Call before
+    /// `pointer_assignment_graph`.
     pub fn set_context_catalogs(
         &mut self,
         llm: Vec<signature::Signature>,
         ac: Vec<signature::Signature>,
+        data: Vec<signature::Signature>,
     ) {
-        self.context_catalogs = Some((llm, ac));
+        self.context_catalogs = Some((llm, ac, data));
     }
 
     /// Iterate over the analyzed `Module`(s).

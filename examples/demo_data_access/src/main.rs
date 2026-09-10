@@ -1,10 +1,16 @@
-// A compact, single-file multi-user LLM service that exhibits a cross-user data
-// leak in the real-app shape. Users sign in with a password (argon2) and receive
-// a bearer token; every request is authenticated from that token and served
-// against one shared, non-user-scoped cache. Two users flow through the SAME
-// handler and one token-decode call site, so the static model can't tell them
-// apart. This exercises AFG's dynamic per-user path end to end. (See
-// `mini-chat-service` for the same service split across modules.)
+// A compact, single-file multi-user service whose cross-user leak sits in a
+// shared DATABASE, not a hand-marked cache. Users sign in with a password
+// (argon2) and get a bearer token; every request is authenticated and served
+// against one table that is keyed by prompt only (not by user), so one user's
+// stored row can be served to another. Two users flow through the SAME handler
+// and one token-decode call site, so the static model can't tell them apart.
+//
+// The difference from demo_dynamic: the store access carries NO hand-written AFG
+// macros. It goes through catalog-matching stubs (`sqlx::query::Query::execute`
+// = data-write, `sqlx::query::Query::fetch_one` = data-read) so AFG's producer
+// finds them via data_access_functions.json and inserts afg_access! itself, with
+// the real PANode. This exercises the data-access catalog + dynamic per-user path
+// end to end. `with_afg_context` is the only AFG piece added by hand.
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -18,25 +24,17 @@ use argon2::{
 // Authentication
 // -----------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Role {
-    User,
-    Admin,
-}
-
 #[derive(Debug, Clone)]
 struct User {
     id: u64,
     username: String,
     password_hash: String,
-    role: Role,
 }
 
 #[derive(Debug, Clone)]
 struct Session {
     user_id: u64,
     username: String,
-    role: Role,
 }
 
 fn hash_password(password: &str) -> String {
@@ -117,7 +115,76 @@ mod async_openai {
 }
 
 // -----------------------------------------------------------------------------
-// User directory and shared cache
+// Shared database (deterministic stand-in for sqlx)
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct AnswerRow {
+    owner_user_id: u64,
+    owner_username: String,
+    answer: String,
+}
+
+// VULNERABILITY: one shared table keyed by prompt only. The requesting user is
+// not part of the key, so one user's row can be returned to another. This is the
+// backing store the sqlx stub reads and writes; a real app would hand sqlx a
+// connection pool instead.
+static TABLE: OnceLock<Mutex<HashMap<String, AnswerRow>>> = OnceLock::new();
+
+fn table() -> &'static Mutex<HashMap<String, AnswerRow>> {
+    TABLE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+// A minimal sqlx-shaped API. AFG matches `Query::fetch_one` (data-read) and
+// `Query::execute` (data-write) by name; the builder steps around them are not
+// cataloged. The shared TABLE stands in for the connection pool's database.
+mod sqlx {
+    use super::{table, AnswerRow};
+
+    pub mod query {
+        use super::{table, AnswerRow};
+
+        pub struct Query {
+            pub key: String,
+            pub row: Option<AnswerRow>,
+        }
+
+        impl Query {
+            /// Bind the row to store (the write path's builder step).
+            pub fn with_row(mut self, row: AnswerRow) -> Self {
+                self.row = Some(row);
+                self
+            }
+
+            /// data-read: return the stored row for this key, if any.
+            #[inline(never)]
+            pub fn fetch_one(&self, _pool: &str) -> Option<AnswerRow> {
+                table().lock().unwrap().get(&self.key).cloned()
+            }
+
+            /// data-write: store the bound row under this key.
+            #[inline(never)]
+            pub fn execute(&self, _pool: &str) -> u64 {
+                let Some(row) = self.row.clone() else {
+                    return 0;
+                };
+                table().lock().unwrap().insert(self.key.clone(), row);
+                1
+            }
+        }
+    }
+
+    #[inline(never)]
+    pub fn query(key: &str) -> query::Query {
+        query::Query {
+            key: key.to_string(),
+            row: None,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// User directory and service
 // -----------------------------------------------------------------------------
 
 static USERS: OnceLock<HashMap<String, User>> = OnceLock::new();
@@ -128,36 +195,15 @@ fn users() -> &'static HashMap<String, User> {
             id: 1,
             username: "alice".to_string(),
             password_hash: hash_password("alice-password"),
-            role: Role::Admin,
         };
         let bob = User {
             id: 2,
             username: "bob".to_string(),
             password_hash: hash_password("bob-password"),
-            role: Role::User,
         };
         HashMap::from([(alice.username.clone(), alice), (bob.username.clone(), bob)])
     })
 }
-
-#[derive(Debug, Clone)]
-struct CacheEntry {
-    owner_user_id: u64,
-    owner_username: String,
-    answer: String,
-}
-
-// VULNERABILITY: one global cache keyed by prompt only. The requesting user is
-// not part of the key, so one user's answer can be served to another.
-static CACHE: OnceLock<Mutex<HashMap<String, CacheEntry>>> = OnceLock::new();
-
-fn cache() -> &'static Mutex<HashMap<String, CacheEntry>> {
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-// -----------------------------------------------------------------------------
-// Service
-// -----------------------------------------------------------------------------
 
 struct Request {
     token: String,
@@ -175,10 +221,8 @@ fn login(username: &str, password: &str) -> Option<String> {
     }
 }
 
-// Developer-marked accesses to the app's shared cache (not a cataloged call, so
-// the pipeline can't find it): a Write when caching, a Read when serving a hit.
-const CACHE_NODE: u64 = 5000;
-const CACHE_FN: u64 = 424242;
+// The connection pool handle; a real app threads this through from app state.
+const POOL: &str = "postgres://app";
 
 async fn handle(req: Request) -> String {
     // Per-request authentication: decode the bearer token to get the principal.
@@ -187,39 +231,35 @@ async fn handle(req: Request) -> String {
             Some(user) => Session {
                 user_id: user.id,
                 username: user.username.clone(),
-                role: user.role,
             },
             None => return String::new(),
         },
         Err(_) => return String::new(),
     };
-    let _ = session.role;
 
-    if let Some(entry) = cache().lock().unwrap().get(&req.prompt).cloned() {
-        afg_runtime::afg_monitor!(function = CACHE_FN);
-        afg_runtime::afg_access!(node = CACHE_NODE, kind = afg_runtime::AccessKind::Read, function = CACHE_FN);
-        if entry.owner_user_id != session.user_id {
+    // data-read: query the shared table for this prompt (AFG inserts afg_access
+    // here from the catalog; there is no hand-written macro).
+    let hit = sqlx::query(&req.prompt).fetch_one(POOL);
+    if let Some(row) = hit {
+        if row.owner_user_id != session.user_id {
             println!(
-                "[leak] {} served a cached answer owned by {}",
-                session.username, entry.owner_username
+                "[leak] {} was served a row owned by {}",
+                session.username, row.owner_username
             );
         }
-        return entry.answer;
+        return row.answer;
     }
 
+    // Miss: compute an answer, then store it under the prompt for anyone.
     let client = async_openai::Client::new();
     let answer = client.chat().create(&req.prompt);
-
-    afg_runtime::afg_monitor!(function = CACHE_FN);
-    afg_runtime::afg_access!(node = CACHE_NODE, kind = afg_runtime::AccessKind::Write, function = CACHE_FN);
-    cache().lock().unwrap().insert(
-        req.prompt.clone(),
-        CacheEntry {
-            owner_user_id: session.user_id,
-            owner_username: session.username,
-            answer: answer.clone(),
-        },
-    );
+    let row = AnswerRow {
+        owner_user_id: session.user_id,
+        owner_username: session.username,
+        answer: answer.clone(),
+    };
+    // data-write: insert the row (AFG inserts afg_access here from the catalog).
+    let _ = sqlx::query(&req.prompt).with_row(row).execute(POOL);
     answer
 }
 
@@ -229,7 +269,8 @@ async fn main() {
     let alice_token = login("alice", "alice-password").expect("alice sign-in");
     let bob_token = login("bob", "bob-password").expect("bob sign-in");
 
-    // 2) Two users issue requests through the same handler.
+    // 2) Two users issue requests through the same handler. Both read the shared
+    //    table, so the two principals meet at the same data-access node.
     let a = tokio::spawn(with_afg_context(
         AfgContext::default(),
         handle(Request {
@@ -246,8 +287,8 @@ async fn main() {
     ));
     let _ = tokio::join!(a, b);
 
-    // 3) bob re-issues alice's earlier request and is served alice's cached
-    //    answer. This is the cross-user leak.
+    // 3) bob re-issues alice's earlier request and is served alice's stored row.
+    //    This is the cross-user leak through the shared table.
     let leaked = with_afg_context(
         AfgContext::default(),
         handle(Request {

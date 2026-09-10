@@ -516,7 +516,7 @@ impl<'m> PointerAssignmentGraph<'m> {
         functions_by_type: &FunctionsByType<'m>,
         mode: &str,
         k: Option<usize>,
-        context_signatures: Option<(Vec<Signature>, Vec<Signature>)>,
+        context_signatures: Option<(Vec<Signature>, Vec<Signature>, Vec<Signature>)>,
     ) -> Self {
         let start_time: Instant = Instant::now();
 
@@ -607,7 +607,20 @@ impl<'m> PointerAssignmentGraph<'m> {
             taint_analysis: engine,
         };
 
-        if let Some(main_name) = pag.find_main_function_name() {
+        // An explicit app-crate override wins over main detection: it lets us
+        // analyze a library crate (a framework-dispatched web app with no reachable
+        // main), and avoids the loose main heuristic false-matching a monomorphized
+        // symbol (e.g. one containing "domain17h").
+        let app_override = std::env::var("AFG_APP_CRATE").ok().filter(|s| !s.is_empty());
+        if let Some(app) = app_override {
+            println!("[PAG] AFG_APP_CRATE = {:?}; seeding its functions (app-crate override)", app);
+            pag.app_crate = app.clone();
+            if let Some(main_name) = pag.find_main_function_name() {
+                pag.pending_functions
+                    .push_back((main_name, PAContext::global()));
+            }
+            pag.seed_app_crate_entry_points(&app);
+        } else if let Some(main_name) = pag.find_main_function_name() {
             println!("[PAG] potential main function: {}", main_name);
 
             // Derive the application crate for all policies (used by selective
@@ -634,7 +647,7 @@ impl<'m> PointerAssignmentGraph<'m> {
             let seed_crate = parse_app_crate(&main_name);
             pag.seed_app_crate_entry_points(&seed_crate);
         } else {
-            println!("[PAG] warning: cannot find main function; no constraints discovered");
+            println!("[PAG] warning: cannot find main function (set AFG_APP_CRATE to analyze a library crate); no constraints discovered");
             return pag;
         }
 
@@ -2807,8 +2820,15 @@ impl<'m> PointerAssignmentGraph<'m> {
         let matched = (self.config.policy == PAContextSelectPolicy::AFG)
             .then(|| self.config.context_signatures.as_ref())
             .flatten()
-            .and_then(|(llm, ac)| {
-                crate::signature::match_callsite(callee_name, caller_name, block_name, llm, ac)
+            .and_then(|(llm, ac, data)| {
+                crate::signature::match_callsite(
+                    callee_name,
+                    caller_name,
+                    block_name,
+                    llm,
+                    ac,
+                    data,
+                )
             });
 
         // for debugging, print the matched context if any
@@ -2842,8 +2862,7 @@ impl<'m> PointerAssignmentGraph<'m> {
                 }
             }
 
-            // special handling for authentication and llm-api categories
-            // TODO: other categories ??
+            // special handling for authentication, llm-api, and data-store categories
             if let Some(category) = context_point.category.clone() {
                 let kind = match category.as_str() {
                     // access-control decisions
@@ -2859,6 +2878,12 @@ impl<'m> PointerAssignmentGraph<'m> {
                         category,
                         provider: None,
                     }),
+
+                    // shared data-store access (read = leak-exposing, write = the
+                    // stored data); the category string carries the direction.
+                    "data-read" | "data-write" => {
+                        Some(SemanticPointKind::DataAccess { category })
+                    }
 
                     // Unknown category: warn and skip rather than crashing the
                     // analysis, so the evolving catalog can add categories safely.

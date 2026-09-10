@@ -1,0 +1,401 @@
+{
+    "_schema_notes": {
+        "purpose": "Reference dataset of database / shared data-store access methods in common Rust web-app stacks (SQL, ORMs, NoSQL/KV, in-process cache libraries). The data-store counterpart to llm_api_functions.json and ac_functions.json. AFG treats a matching call as a shared-resource access point: taint (principal) contexts are seeded at it, so two principals reaching the same store node surface as a cross-user overlap, and a write-then-read across principals is the leak.",
+        "usage": "Loaded by rail-rs/src/signature.rs load_signatures and matched by the same demangled-symbol matcher used for the LLM/AC catalogs (suffix match on the full path, or a last-two-segment short-name match). No type checking is done; only fn_name (plus category and, for writes, request_index) is read.",
+        "match_rule": "demangled(callee) == fn_name, OR demangled(callee) ends_with ::fn_name, OR last-two-segments(demangled) == last-two-segments(fn_name). Because real symbols carry crate-internal prefixes (e.g. sqlx_core::), most entries match via the last-two-segment short name (Type::method); keep that pair specific.",
+        "category_values": "data-read (a read/query that returns stored data; the leak-exposing direction) | data-write (an insert/update/store that puts data into the shared store)",
+        "request_index": "Optional. For a data-write, the argument index (0-based over the call's actual operands, receiver included) of the value being stored, so the principal is seeded onto the written data. Reads seed the call result instead and need no index.",
+        "verification_caveat": "fn_name paths are from general knowledge of each crate's public API and are matched primarily by the last-two-segment short name; they have not all been re-verified against a specific crate version. Short-name matching can also match an app's own type with the same Type::method pair (e.g. a local struct Cache with a get); spot-check matches against the target's installed crates.",
+        "not_cataloged": "A bespoke in-process store (a hand-rolled Arc<Mutex<HashMap>>) is deliberately NOT here: cataloging HashMap::get/insert would match every map in the program. That case is left to the points-to analysis (a heap object aliased by two principals) and to developer annotation."
+    },
+
+    "sqlx": [
+        {
+            "fn_name": "sqlx::query::Query::fetch_one",
+            "category": "data-read",
+            "return_type": "Result<DB::Row, Error>",
+            "parameter_type": ["self", "E"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "sqlx::query::Query::fetch_all",
+            "category": "data-read",
+            "return_type": "Result<Vec<DB::Row>, Error>",
+            "parameter_type": ["self", "E"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "sqlx::query::Query::fetch_optional",
+            "category": "data-read",
+            "return_type": "Result<Option<DB::Row>, Error>",
+            "parameter_type": ["self", "E"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "sqlx::query_as::QueryAs::fetch_one",
+            "category": "data-read",
+            "return_type": "Result<O, Error>",
+            "parameter_type": ["self", "E"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "sqlx::query_as::QueryAs::fetch_all",
+            "category": "data-read",
+            "return_type": "Result<Vec<O>, Error>",
+            "parameter_type": ["self", "E"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "sqlx::query_as::QueryAs::fetch_optional",
+            "category": "data-read",
+            "return_type": "Result<Option<O>, Error>",
+            "parameter_type": ["self", "E"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "sqlx::query::Query::execute",
+            "category": "data-write",
+            "return_type": "Result<DB::QueryResult, Error>",
+            "parameter_type": ["self", "E"],
+            "verified_via": "general-knowledge",
+            "taint_role": "INSERT/UPDATE/DELETE; the stored value is bound onto the Query receiver (self) before execute, so the write data travels with the receiver rather than a separate argument"
+        }
+    ],
+
+    "diesel": [
+        {
+            "fn_name": "diesel::query_dsl::RunQueryDsl::load",
+            "category": "data-read",
+            "return_type": "QueryResult<Vec<U>>",
+            "parameter_type": ["self", "&mut Conn"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "diesel::query_dsl::RunQueryDsl::get_result",
+            "category": "data-read",
+            "return_type": "QueryResult<U>",
+            "parameter_type": ["self", "&mut Conn"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "diesel::query_dsl::RunQueryDsl::get_results",
+            "category": "data-read",
+            "return_type": "QueryResult<Vec<U>>",
+            "parameter_type": ["self", "&mut Conn"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "diesel::query_dsl::RunQueryDsl::first",
+            "category": "data-read",
+            "return_type": "QueryResult<U>",
+            "parameter_type": ["self", "&mut Conn"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "diesel::query_dsl::RunQueryDsl::execute",
+            "category": "data-write",
+            "return_type": "QueryResult<usize>",
+            "parameter_type": ["self", "&mut Conn"],
+            "verified_via": "general-knowledge",
+            "taint_role": "runs INSERT/UPDATE/DELETE built on the receiver; the written values ride on self"
+        }
+    ],
+
+    "sea-orm": [
+        {
+            "fn_name": "sea_orm::Select::one",
+            "category": "data-read",
+            "return_type": "Result<Option<M>, DbErr>",
+            "parameter_type": ["self", "&C"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "sea_orm::Select::all",
+            "category": "data-read",
+            "return_type": "Result<Vec<M>, DbErr>",
+            "parameter_type": ["self", "&C"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "sea_orm::EntityTrait::find_by_id",
+            "category": "data-read",
+            "return_type": "Select<Self>",
+            "parameter_type": ["V"],
+            "verified_via": "general-knowledge",
+            "taint_role": "builder entry; the store read happens at Select::one/all, but find_by_id marks the by-id lookup that is the classic IDOR shape"
+        },
+        {
+            "fn_name": "sea_orm::ActiveModelTrait::insert",
+            "category": "data-write",
+            "return_type": "Result<Self::Model, DbErr>",
+            "parameter_type": ["self", "&C"],
+            "request_index": 0,
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "sea_orm::ActiveModelTrait::update",
+            "category": "data-write",
+            "return_type": "Result<Self::Model, DbErr>",
+            "parameter_type": ["self", "&C"],
+            "request_index": 0,
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "sea_orm::ActiveModelTrait::delete",
+            "category": "data-write",
+            "return_type": "Result<DeleteResult, DbErr>",
+            "parameter_type": ["self", "&C"],
+            "verified_via": "general-knowledge"
+        }
+    ],
+
+    "tokio-postgres": [
+        {
+            "fn_name": "tokio_postgres::Client::query",
+            "category": "data-read",
+            "return_type": "Result<Vec<Row>, Error>",
+            "parameter_type": ["&self", "&T", "&[&(dyn ToSql + Sync)]"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "tokio_postgres::Client::query_one",
+            "category": "data-read",
+            "return_type": "Result<Row, Error>",
+            "parameter_type": ["&self", "&T", "&[&(dyn ToSql + Sync)]"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "tokio_postgres::Client::query_opt",
+            "category": "data-read",
+            "return_type": "Result<Option<Row>, Error>",
+            "parameter_type": ["&self", "&T", "&[&(dyn ToSql + Sync)]"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "tokio_postgres::Client::execute",
+            "category": "data-write",
+            "return_type": "Result<u64, Error>",
+            "parameter_type": ["&self", "&T", "&[&(dyn ToSql + Sync)]"],
+            "request_index": 2,
+            "verified_via": "general-knowledge"
+        }
+    ],
+
+    "rusqlite": [
+        {
+            "fn_name": "rusqlite::Statement::query",
+            "category": "data-read",
+            "return_type": "Result<Rows>",
+            "parameter_type": ["&mut self", "P"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "rusqlite::Connection::query_row",
+            "category": "data-read",
+            "return_type": "Result<T>",
+            "parameter_type": ["&self", "&str", "P", "F"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "rusqlite::Statement::execute",
+            "category": "data-write",
+            "return_type": "Result<usize>",
+            "parameter_type": ["&mut self", "P"],
+            "request_index": 1,
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "rusqlite::Connection::execute",
+            "category": "data-write",
+            "return_type": "Result<usize>",
+            "parameter_type": ["&self", "&str", "P"],
+            "request_index": 2,
+            "verified_via": "general-knowledge"
+        }
+    ],
+
+    "mongodb": [
+        {
+            "fn_name": "mongodb::Collection::find",
+            "category": "data-read",
+            "return_type": "Result<Cursor<T>>",
+            "parameter_type": ["&self", "Document"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "mongodb::Collection::find_one",
+            "category": "data-read",
+            "return_type": "Result<Option<T>>",
+            "parameter_type": ["&self", "Document"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "mongodb::Collection::insert_one",
+            "category": "data-write",
+            "return_type": "Result<InsertOneResult>",
+            "parameter_type": ["&self", "impl Borrow<T>"],
+            "request_index": 1,
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "mongodb::Collection::insert_many",
+            "category": "data-write",
+            "return_type": "Result<InsertManyResult>",
+            "parameter_type": ["&self", "impl IntoIterator"],
+            "request_index": 1,
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "mongodb::Collection::update_one",
+            "category": "data-write",
+            "return_type": "Result<UpdateResult>",
+            "parameter_type": ["&self", "Document", "UpdateModifications"],
+            "request_index": 2,
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "mongodb::Collection::delete_one",
+            "category": "data-write",
+            "return_type": "Result<DeleteResult>",
+            "parameter_type": ["&self", "Document"],
+            "verified_via": "general-knowledge"
+        }
+    ],
+
+    "redis": [
+        {
+            "fn_name": "redis::Commands::get",
+            "category": "data-read",
+            "return_type": "RedisResult<RV>",
+            "parameter_type": ["&mut self", "K"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "redis::Commands::hget",
+            "category": "data-read",
+            "return_type": "RedisResult<RV>",
+            "parameter_type": ["&mut self", "K", "F"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "redis::AsyncCommands::get",
+            "category": "data-read",
+            "return_type": "RedisFuture<RV>",
+            "parameter_type": ["&mut self", "K"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "redis::Commands::set",
+            "category": "data-write",
+            "return_type": "RedisResult<RV>",
+            "parameter_type": ["&mut self", "K", "V"],
+            "request_index": 2,
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "redis::Commands::hset",
+            "category": "data-write",
+            "return_type": "RedisResult<RV>",
+            "parameter_type": ["&mut self", "K", "F", "V"],
+            "request_index": 3,
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "redis::AsyncCommands::set",
+            "category": "data-write",
+            "return_type": "RedisFuture<RV>",
+            "parameter_type": ["&mut self", "K", "V"],
+            "request_index": 2,
+            "verified_via": "general-knowledge"
+        }
+    ],
+
+    "moka": [
+        {
+            "fn_name": "moka::sync::Cache::get",
+            "category": "data-read",
+            "return_type": "Option<V>",
+            "parameter_type": ["&self", "&Q"],
+            "verified_via": "general-knowledge",
+            "taint_role": "in-process shared cache; the library-backed counterpart to the demo's bespoke Arc<Mutex<HashMap>> (which is not cataloged)"
+        },
+        {
+            "fn_name": "moka::future::Cache::get",
+            "category": "data-read",
+            "return_type": "Option<V>",
+            "parameter_type": ["&self", "&Q"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "moka::sync::Cache::insert",
+            "category": "data-write",
+            "return_type": "()",
+            "parameter_type": ["&self", "K", "V"],
+            "request_index": 2,
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "moka::future::Cache::insert",
+            "category": "data-write",
+            "return_type": "()",
+            "parameter_type": ["&self", "K", "V"],
+            "request_index": 2,
+            "verified_via": "general-knowledge"
+        }
+    ],
+
+    "dashmap": [
+        {
+            "fn_name": "dashmap::DashMap::get",
+            "category": "data-read",
+            "return_type": "Option<Ref<K, V>>",
+            "parameter_type": ["&self", "&Q"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "dashmap::DashMap::insert",
+            "category": "data-write",
+            "return_type": "Option<V>",
+            "parameter_type": ["&self", "K", "V"],
+            "request_index": 2,
+            "verified_via": "general-knowledge"
+        }
+    ],
+
+    "cached": [
+        {
+            "fn_name": "cached::Cached::cache_get",
+            "category": "data-read",
+            "return_type": "Option<&V>",
+            "parameter_type": ["&mut self", "&K"],
+            "verified_via": "general-knowledge"
+        },
+        {
+            "fn_name": "cached::Cached::cache_set",
+            "category": "data-write",
+            "return_type": "Option<V>",
+            "parameter_type": ["&mut self", "K", "V"],
+            "request_index": 2,
+            "verified_via": "general-knowledge"
+        }
+    ],
+
+    "raw-http-data": [
+        {
+            "fn_name": "postgrest::Builder::execute",
+            "category": "data-read",
+            "return_type": "Result<Response, Error>",
+            "parameter_type": ["self"],
+            "verified_via": "general-knowledge",
+            "taint_role": "Supabase/PostgREST client; the query (select/insert/update) is built on the Builder receiver, so execute is the store access point"
+        },
+        {
+            "fn_name": "reqwest::RequestBuilder::send",
+            "category": "data-read",
+            "return_type": "Result<Response, reqwest::Error>",
+            "parameter_type": ["self"],
+            "verified_via": "ambient",
+            "taint_role": "catch-all for a data backend reached over raw HTTP (Firestore/Supabase REST, a REST API). NOTE: the LLM and AC catalogs also claim reqwest::send and are matched first (LLM, then AC, then data), so this entry is shadowed today; it becomes useful once URL/host-hint narrowing disambiguates the three, mirroring ac_hints.rs"
+        }
+    ]
+}
