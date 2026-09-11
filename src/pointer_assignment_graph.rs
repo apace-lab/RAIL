@@ -1,14 +1,14 @@
-use crate::taint_analysis::SemanticPoint;
-use crate::taint_analysis::SemanticPointKind;
 use crate::call_graph::CallGraph;
 use crate::context::{
     PAConfig, PAContext, PAContextElem, PAContextMode, PAContextSelectPolicy, PAObjectContextKind,
 };
 use crate::signature::Signature;
+use crate::taint_analysis::SemanticPoint;
+use crate::taint_analysis::SemanticPointKind;
 use crate::util;
-use crate::TaintAnalysis;
 use crate::ControlFlowGraph;
 use crate::FunctionsByType;
+use crate::TaintAnalysis;
 use core::panic;
 use llvm_ir::function::Parameter;
 use llvm_ir::function::ParameterAttribute;
@@ -571,7 +571,7 @@ impl<'m> PointerAssignmentGraph<'m> {
             _ => panic!("no such config."),
         };
 
-        let mut engine = if config.policy == PAContextSelectPolicy::AFG {
+        let mut taint_analysis = if config.policy == PAContextSelectPolicy::AFG {
             Some(TaintAnalysis::new())
         } else {
             None
@@ -604,16 +604,21 @@ impl<'m> PointerAssignmentGraph<'m> {
             config: config,
             app_crate: String::new(),
             semantic_points: Vec::new(),
-            taint_analysis: engine,
+            taint_analysis,
         };
 
         // An explicit app-crate override wins over main detection: it lets us
         // analyze a library crate (a framework-dispatched web app with no reachable
         // main), and avoids the loose main heuristic false-matching a monomorphized
         // symbol (e.g. one containing "domain17h").
-        let app_override = std::env::var("AFG_APP_CRATE").ok().filter(|s| !s.is_empty());
+        let app_override = std::env::var("AFG_APP_CRATE")
+            .ok()
+            .filter(|s| !s.is_empty());
         if let Some(app) = app_override {
-            println!("[PAG] AFG_APP_CRATE = {:?}; seeding its functions (app-crate override)", app);
+            println!(
+                "[PAG] AFG_APP_CRATE = {:?}; seeding its functions (app-crate override)",
+                app
+            );
             pag.app_crate = app.clone();
             if let Some(main_name) = pag.find_main_function_name() {
                 pag.pending_functions
@@ -676,10 +681,11 @@ impl<'m> PointerAssignmentGraph<'m> {
 
         pag.print_statistics();
 
-        if let Some(mut engine) = pag.taint_analysis.take() {
-            engine.init(&pag);
-            engine.run();
-            engine.print_result();
+        // for AFG
+        if let Some(mut taint_analysis) = pag.taint_analysis.take() {
+            taint_analysis.init(&pag);
+            taint_analysis.run();
+            taint_analysis.print_result();
         }
 
         pag
@@ -2610,6 +2616,11 @@ impl<'m> PointerAssignmentGraph<'m> {
 
                 false
             }
+
+            PAContextSelectPolicy::CONCURRENCY => {
+                // TODO: implement context creation for concurrency policy
+                false
+            }
         };
 
         // For KCFA / KMixed
@@ -2866,8 +2877,9 @@ impl<'m> PointerAssignmentGraph<'m> {
             if let Some(category) = context_point.category.clone() {
                 let kind = match category.as_str() {
                     // access-control decisions
-                    "authentication" | "authorization" | "policy-enforcement"
-                    | "raw-http" => Some(SemanticPointKind::AccessControl { category }),
+                    "authentication" | "authorization" | "policy-enforcement" | "raw-http" => {
+                        Some(SemanticPointKind::AccessControl { category })
+                    }
 
                     // prompt-construction api call
                     "llm-api-prompt" => Some(SemanticPointKind::LlmPrompt { category }),
@@ -2881,9 +2893,7 @@ impl<'m> PointerAssignmentGraph<'m> {
 
                     // shared data-store access (read = leak-exposing, write = the
                     // stored data); the category string carries the direction.
-                    "data-read" | "data-write" => {
-                        Some(SemanticPointKind::DataAccess { category })
-                    }
+                    "data-read" | "data-write" => Some(SemanticPointKind::DataAccess { category }),
 
                     // Unknown category: warn and skip rather than crashing the
                     // analysis, so the evolving catalog can add categories safely.
