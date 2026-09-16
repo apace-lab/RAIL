@@ -76,6 +76,13 @@ pub struct SemanticPoint {
     // Actual argument nodes at the callsite.
     pub argument_nodes: Vec<PANodeId>,
 
+    // ALL of the callsite's argument nodes, ordered by index (unlike
+    // `argument_nodes`, which the catalog narrows to the prompt/request payload).
+    // Used to find the shared store a data-access call operates on: the store
+    // handle (a &Pool / &Transaction / receiver) is one of these arguments, and
+    // its points-to target is shared across the data-access sites on that store.
+    pub store_arg_nodes: Vec<PANodeId>,
+
     // Actual caller-side result, including normalized sret.
     pub result_node: Option<PANodeId>, // maybe sret
 }
