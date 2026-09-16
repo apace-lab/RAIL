@@ -23,10 +23,10 @@ pub enum PAContextElem {
         id: usize,
     },
 
-    Principal {
-        auth_callsite: usize,
-    },
+    /// AFG used for tracking principal authorization callsites
+    Principal { auth_callsite: usize },
 
+    /// AFG used for tracking LLM API callsites
     LlmApi {
         callsite_id: usize,
         provider: String,
@@ -37,6 +37,7 @@ pub enum PAContextElem {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PAObjectContextKind {
     Allocation,
+    Summary,
     // ArcNew,
     // BoxNew,
     // RcNew,
@@ -44,7 +45,6 @@ pub enum PAObjectContextKind {
     // MutexLock,
     // ThreadSpawn,
     // ChannelCreate,
-    Summary,
 }
 
 /// we can have:
@@ -251,9 +251,13 @@ pub enum PAContextSelectPolicy {
     /// be re-analyzed under every distinct caller context) while keeping context
     /// where per-user precision actually matters. no-op when app_crate is empty.
     AppOnly,
-    /// when (llm, access-control) catalogs are provided;
+    /// when (llm, access-control, data-access) catalogs are provided;
     /// then create context when seeing these functions
     AFG,
+
+    /// when (concurrency-related) catalogs are provided;
+    /// use origin-sensitive algorithm: create context when seeing thread creation/task creation
+    CONCURRENCY,
 }
 
 #[derive(Debug, Clone)]
@@ -276,6 +280,7 @@ pub struct PAConfig {
 
     /// which functions we apply context-sensitivity on
     pub policy: PAContextSelectPolicy,
+
     /// together with AFG:
     /// (llm, access-control, data-store) catalogs; when set, matched call sites are
     /// recorded as context points while the analysis visits calls

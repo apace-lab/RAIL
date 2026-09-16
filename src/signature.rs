@@ -1,7 +1,7 @@
-//! LLVM-side finder for AFG context points: reads the AFG catalogs
+//! LLVM-side finder for SIG context points: reads the SIG catalogs
 //! (llm_api_functions.json, ac_functions.json) and locates call sites in the
 //! module whose demangled callee matches a catalog fn_name. This is the LLVM
-//! counterpart to AFG's MIR-text find_llm_calls / find_ac_points; matching runs
+//! counterpart to SIG's MIR-text find_llm_calls / find_ac_points; matching runs
 //! on demangled symbols (suffix / short-name) instead of MIR-text regexes.
 
 use either::Either;
@@ -27,10 +27,15 @@ pub enum SecurityTag {
 pub struct Signature {
     pub fn_name: String,
     pub category: Option<String>,
+
+    /// for AFG use
     pub prompt_arg_index: Option<usize>, // TODO: there might be multiple prompt args, but for now we only support one
     pub prompt_role: Option<String>,
     pub result_index: Option<usize>,
     pub request_index: Option<usize>, // TODO: there might be multiple request args, but for now we only support one
+
+    /// for DCG use
+    pub behavior: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -44,17 +49,11 @@ pub struct SecurityPoint {
     pub category: Option<String>,
     pub prompt_arg_index: Option<usize>, // for llm-api-prompt, the index of the argument that is the prompt
     pub prompt_role: Option<String>, // for llm-api-prompt, the role of the prompt (system/user/developer)
-    // pub result_index: Option<usize>, // for llm-api-chat, the index of the argument that is the result, i.e., sret
     pub request_index: Option<usize>, // for llm-api-chat, the index of the argument that is the request (should include prompt)
     pub strategy: &'static str,
-    // /// PAG node ids for this call's argument values (filled in by the pointer
-    // /// analysis); their points-to sets are resolved after the fixed point
-    // pub arg_nodes: Vec<usize>,
-    // /// PAG node id for this call's result value, if any
-    // pub result_node: Option<usize>,
 }
 
-/// load fn_name signatures from an AFG catalog json, skipping the _schema_notes key
+/// load fn_name signatures from an SIG catalog json, skipping the _schema_notes key
 pub fn load_signatures(path: &Path) -> Result<Vec<Signature>, Box<dyn Error>> {
     let content = std::fs::read_to_string(path)?;
     let data: HashMap<String, serde_json::Value> = serde_json::from_str(&content)?;
@@ -76,7 +75,7 @@ pub fn load_signatures(path: &Path) -> Result<Vec<Signature>, Box<dyn Error>> {
                 continue;
             }
 
-            debug!("[AFG] load_signatures: entry={:?}", entry);
+            debug!("[SIG] load_signatures: entry={:?}", entry);
 
             let category = entry
                 .get("category")
@@ -103,8 +102,13 @@ pub fn load_signatures(path: &Path) -> Result<Vec<Signature>, Box<dyn Error>> {
                 .and_then(|i| i.as_u64())
                 .map(|i| i as usize);
 
-            debug!("[AFG] load_signatures: fn_name={}, category={:?}, prompt_arg_index={:?}, prompt_role={:?}, result_index={:?}, request_index={:?}",
-                    fn_name, category, prompt_arg_index, prompt_role, result_index, request_index
+            let behavior: Option<String> = entry
+                .get("behavior")
+                .and_then(|b| b.as_str())
+                .map(|s| s.to_string());
+
+            debug!("[SIG] load_signatures: fn_name={}, category={:?}, prompt_arg_index={:?}, prompt_role={:?}, result_index={:?}, request_index={:?}, behavior={:?}",
+                    fn_name, category, prompt_arg_index, prompt_role, result_index, request_index, behavior
                 );
 
             signatures.push(Signature {
@@ -114,6 +118,7 @@ pub fn load_signatures(path: &Path) -> Result<Vec<Signature>, Box<dyn Error>> {
                 prompt_role,
                 result_index,
                 request_index,
+                behavior,
             });
         }
     }
@@ -150,8 +155,7 @@ pub fn find_security_points(
 
             if let Terminator::Invoke(invoke) = &block.term {
                 if let Some(callee) = callee_symbol(&invoke.function) {
-                    if let Some(point) =
-                        match_callsite(&callee, caller, &block_name, llm, ac, data)
+                    if let Some(point) = match_callsite(&callee, caller, &block_name, llm, ac, data)
                     {
                         points.push(point);
                     }
@@ -190,7 +194,7 @@ pub fn match_callsite(
     };
 
     debug!(
-        "[AFG] match_callsite: sig.request_index={:?}",
+        "[SIG] match_callsite: sig.request_index={:?}",
         sig.request_index
     );
 
@@ -203,11 +207,8 @@ pub fn match_callsite(
         category: sig.category.clone(),
         prompt_arg_index: sig.prompt_arg_index,
         prompt_role: sig.prompt_role.clone(),
-        // result_index: sig.result_index,
         request_index: sig.request_index,
         strategy,
-        // arg_nodes: Vec::new(),
-        // result_node: None,
     })
 }
 
@@ -355,6 +356,7 @@ mod tests {
             prompt_role: None,
             result_index: None,
             request_index: None,
+            behavior: None,
         }
     }
 
@@ -514,6 +516,7 @@ mod tests {
             prompt_role: None,
             result_index: None,
             request_index: None,
+            behavior: None,
         }
     }
 
