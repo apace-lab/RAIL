@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "afg-runtime"
+name = "afg_runtime"
 version = "0.1.0"
 dependencies = [
  "madsim",
@@ -444,7 +444,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "mini_chat_service"
 version = "0.1.0"
 dependencies = [
- "afg-runtime",
+ "afg_runtime",
  "argon2",
  "madsim",
  "madsim-tokio",

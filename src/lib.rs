@@ -5,6 +5,8 @@
 //! see the [crate's README](https://github.com/cdisselkoen/llvm-ir-analysis/blob/main/README.md).
 
 pub mod taint_analysis;
+pub mod debuginfo;
+pub mod dominance;
 mod call_graph;
 mod context;
 mod control_dep_graph;
@@ -12,6 +14,7 @@ mod control_flow_graph;
 mod dominator_tree;
 mod functions_by_type;
 mod pointer_assignment_graph;
+pub mod guard_inference;
 pub mod signature;
 pub mod util;
 
@@ -24,7 +27,7 @@ pub use crate::control_dep_graph::ControlDependenceGraph;
 pub use crate::control_flow_graph::{CFGNode, ControlFlowGraph};
 pub use crate::dominator_tree::{DominatorTree, PostDominatorTree};
 pub use crate::functions_by_type::FunctionsByType;
-pub use crate::pointer_assignment_graph::{PAEdge, PANode, PointerAssignmentGraph};
+pub use crate::pointer_assignment_graph::{detect_app_crate, PAEdge, PANode, PointerAssignmentGraph};
 use llvm_ir::{Function, Module};
 use log::debug;
 use std::cell::{Ref, RefCell};
@@ -178,6 +181,11 @@ pub struct CrossModuleAnalysis<'m> {
     )>,
     /// optional taint analysis for the module, which can be used to detect potential leaks of sensitive information from LLM API calls to access-control sinks
     taint_analysis: SimpleCache<TaintAnalysis<'m>>,
+    /// optional debug-info type recovery, scanned from the textual IR (see
+    /// `rail_rs::debuginfo`). Populated by `set_debug_types`; consumed by the dominance
+    /// pass to keep resources of different concrete types from binding when opaque-pointer
+    /// points-to over-merges them.
+    debug_types: Option<crate::debuginfo::DebugTypes>,
 }
 
 impl<'m> CrossModuleAnalysis<'m> {
@@ -200,7 +208,20 @@ impl<'m> CrossModuleAnalysis<'m> {
             module_analyses,
             context_catalogs: None,
             taint_analysis: SimpleCache::new(),
+            debug_types: None,
         }
+    }
+
+    /// Provide debug-info types recovered from the textual IR (see
+    /// [`crate::debuginfo::DebugTypes`]). Optional; when absent the dominance pass runs on
+    /// points-to alone.
+    pub fn set_debug_types(&mut self, dt: crate::debuginfo::DebugTypes) {
+        self.debug_types = Some(dt);
+    }
+
+    /// The recovered debug-info types, if [`set_debug_types`] was called.
+    pub fn debug_types(&self) -> Option<&crate::debuginfo::DebugTypes> {
+        self.debug_types.as_ref()
     }
 
     /// Provide the (llm, access-control, data-store) catalogs so the pointer
@@ -315,8 +336,12 @@ pub struct FunctionAnalysis<'m> {
     function: &'m Function,
     /// Control flow graph for the function
     control_flow_graph: SimpleCache<ControlFlowGraph<'m>>,
+    /// Control flow graph with coroutine (async) resume-dispatch normalization
+    control_flow_graph_coroutine: SimpleCache<ControlFlowGraph<'m>>,
     /// Dominator tree for the function
     dominator_tree: SimpleCache<DominatorTree<'m>>,
+    /// Dominator tree over the coroutine-normalized CFG
+    dominator_tree_coroutine: SimpleCache<DominatorTree<'m>>,
     /// Postdominator tree for the function
     postdominator_tree: SimpleCache<PostDominatorTree<'m>>,
     /// Control dependence graph for the function
@@ -332,7 +357,9 @@ impl<'m> FunctionAnalysis<'m> {
         Self {
             function,
             control_flow_graph: SimpleCache::new(),
+            control_flow_graph_coroutine: SimpleCache::new(),
             dominator_tree: SimpleCache::new(),
+            dominator_tree_coroutine: SimpleCache::new(),
             postdominator_tree: SimpleCache::new(),
             control_dep_graph: SimpleCache::new(),
         }
@@ -346,11 +373,31 @@ impl<'m> FunctionAnalysis<'m> {
         })
     }
 
+    /// Get the coroutine-normalized `ControlFlowGraph` (async resume-dispatch rewired so
+    /// dominance reflects source order across `await`s). Identical to
+    /// [`control_flow_graph`](Self::control_flow_graph) for non-coroutine functions.
+    pub fn control_flow_graph_coroutine(&self) -> Ref<ControlFlowGraph<'m>> {
+        self.control_flow_graph_coroutine.get_or_insert_with(|| {
+            debug!("computing coroutine-normalized CFG for {}", &self.function.name);
+            ControlFlowGraph::new_coroutine_aware(self.function)
+        })
+    }
+
     /// Get the `DominatorTree` for the function.
     pub fn dominator_tree(&self) -> Ref<DominatorTree<'m>> {
         self.dominator_tree.get_or_insert_with(|| {
             let cfg = self.control_flow_graph();
             debug!("computing dominator tree for {}", &self.function.name);
+            DominatorTree::new(&cfg)
+        })
+    }
+
+    /// Get the `DominatorTree` over the coroutine-normalized CFG. Use this for
+    /// dominance queries that must hold across `await` points in `async fn`s.
+    pub fn dominator_tree_coroutine(&self) -> Ref<DominatorTree<'m>> {
+        self.dominator_tree_coroutine.get_or_insert_with(|| {
+            let cfg = self.control_flow_graph_coroutine();
+            debug!("computing coroutine dominator tree for {}", &self.function.name);
             DominatorTree::new(&cfg)
         })
     }

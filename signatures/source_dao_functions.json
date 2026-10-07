@@ -1,0 +1,40 @@
+{
+    "_schema_notes": {
+        "purpose": "SOURCE-level DAO capture rules. Some ORM data layers erase the data access from the LLVM IR: an #[async_trait] method (e.g. lemmy's Crud) is boxed into Pin<Box<dyn Future>> at the call site, so the concrete row type and the id argument are captured into the future's state and never appear as a catalogable call or a visible argument in the IR. The IR producer therefore cannot flag the access or recover the per-instance resource. But the SOURCE call is plain text with the id in scope. afg_instrument's source-DAO pass (inject_source_dao_accesses / find_dao_let_bindings) matches `let <binding> = <..Type::method(..)..>;` in the copied source and injects, right after it, a resource-linked afg_access recording <prefix>:<binding><id_expr>, plus the principal (when the enclosing fn exposes principal_param) and any declared authorized parties. This file keeps all app/library specifics as DATA, not code.",
+        "usage": "Loaded by afg_instrument::load_source_dao_rules (skips the _schema_notes key); passed to instrument_project. Each group key (e.g. an app name) maps to a list of rules.",
+        "fields": {
+            "call": "Qualified `Type::method` to match against a `let` initializer call (matched structurally through ?/await/&/parens), e.g. \"PrivateMessage::read\".",
+            "kind": "\"Read\" (serves stored data; the leak-exposing direction) or \"Write\" (establishes/mutates the instance; owner-establishing).",
+            "prefix": "Resource label, so two accesses to the same instance link by `<prefix>:<id>`.",
+            "id_expr": "Expression appended to the bound value to reach the instance id (e.g. \".id\"). The bound value is a row of the DAO's return type.",
+            "count": "Rows this access yields. A read serves 1 (a non-owner read of that is the leak); a create/owner write serves 0.",
+            "authorized_expr": "Optional. A `Vec<String>` expression naming the resource's additional authorized principals (a PM's recipient, a doc's collaborators), with `{binding}` substituted by the bound value. afg_observe then does not flag a legitimate second party.",
+            "principal_param": "Optional. The handler parameter that carries the authenticated user (e.g. \"local_user_view\"); the principal is established only in functions that have it, so non-handler call sites still compile.",
+            "principal_expr": "Required when principal_param is set. Expression for the principal, evaluated in the handler (e.g. \"local_user_view.person.id\")."
+        },
+        "caveat": "These rules name an app's own DAO methods and handler conventions, so they are per-app config (like the library entries in the other catalogs are per-library). They are DATA here, not logic in code; the source-DAO mechanism is general. A fully app-agnostic version would infer the id/principal expressions, which is future work."
+    },
+
+    "lemmy": [
+        {
+            "call": "PrivateMessageReport::report",
+            "kind": "Read",
+            "prefix": "pm",
+            "resource_id_expr": "private_message_id",
+            "count": 1,
+            "principal_param": "local_user_view",
+            "principal_expr": "local_user_view.person.id",
+            "_note": "SERVE POINT, not the DB read. `PrivateMessageReport::report` commits the PM content (original_pm_text) into the report returned to the reporter, and runs only AFTER the recipient check in patched lemmy (>= 0.19.1). Capturing here (resource = the in-scope private_message_id) means a non-participant who is denied before this call produces no event (no false positive on the fix), while an unchecked path (0.19.0) reaches it and is flagged. Capturing at `PrivateMessage::read` instead would fire before the check and false-positive on the fixed version."
+        },
+        {
+            "call": "PrivateMessage::create",
+            "kind": "Write",
+            "prefix": "pm",
+            "id_expr": ".id",
+            "count": 0,
+            "authorized_expr": "vec![format!(\"{:?}\", {binding}.recipient_id)]",
+            "principal_param": "local_user_view",
+            "principal_expr": "local_user_view.person.id"
+        }
+    ]
+}

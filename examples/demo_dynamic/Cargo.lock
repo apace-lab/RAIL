@@ -3,23 +3,23 @@
 version = 4
 
 [[package]]
-name = "afg-runtime"
+name = "afg_dyn_demo"
+version = "0.1.0"
+dependencies = [
+ "afg_runtime",
+ "argon2",
+ "madsim",
+ "madsim-tokio",
+]
+
+[[package]]
+name = "afg_runtime"
 version = "0.1.0"
 dependencies = [
  "madsim",
  "madsim-tokio",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "afg_dyn_demo"
-version = "0.1.0"
-dependencies = [
- "afg-runtime",
- "argon2",
- "madsim",
- "madsim-tokio",
 ]
 
 [[package]]

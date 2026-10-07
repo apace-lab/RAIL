@@ -23,7 +23,7 @@ pub enum SecurityTag {
     DataAccess,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Signature {
     pub fn_name: String,
     pub category: Option<String>,
@@ -33,6 +33,28 @@ pub struct Signature {
     pub prompt_role: Option<String>,
     pub result_index: Option<usize>,
     pub request_index: Option<usize>, // TODO: there might be multiple request args, but for now we only support one
+
+    /// Operand index (receiver-inclusive) of the argument naming the resource
+    /// INSTANCE at a data access (the file path, the row id), so the instrumenter
+    /// can capture the runtime id and the oracle can tell instance pm:1 from pm:2.
+    pub resource_arg: Option<usize>,
+    /// Short label for the captured runtime id (e.g. "file", "pm").
+    pub resource_prefix: Option<String>,
+    /// Data access: when true the resource instance id is read from the call's
+    /// RETURN value (e.g. an ORM `create` that returns the row with its generated
+    /// id), not from an argument. The call is then wrapped to capture its result.
+    pub resource_from_return: Option<bool>,
+    /// Data access: template to reach the resource id from the captured return value
+    /// (`{}` = the value), e.g. `{}.id`. Default `{}`.
+    pub resource_expr: Option<String>,
+
+    /// Auth: when true the principal is the call's RETURN value (not an argument),
+    /// e.g. dufs's `guard(...) -> (Option<String>, _)`. The instrumenter then wraps
+    /// the call to capture its result.
+    pub principal_from_return: Option<bool>,
+    /// Auth: expression template to reach the principal from the captured value
+    /// (`{}` = the value), e.g. `{}.0` for the first tuple element. Default `{}`.
+    pub principal_expr: Option<String>,
 
     /// for DCG use
     pub behavior: Option<String>,
@@ -50,6 +72,12 @@ pub struct SecurityPoint {
     pub prompt_arg_index: Option<usize>, // for llm-api-prompt, the index of the argument that is the prompt
     pub prompt_role: Option<String>, // for llm-api-prompt, the role of the prompt (system/user/developer)
     pub request_index: Option<usize>, // for llm-api-chat, the index of the argument that is the request (should include prompt)
+    pub resource_arg: Option<usize>, // data access: operand index naming the resource instance (file path / row id)
+    pub resource_prefix: Option<String>, // data access: label for the captured runtime id
+    pub resource_from_return: Option<bool>, // data access: resource id is read from the call's return value
+    pub resource_expr: Option<String>, // data access: template to reach the resource id from the return value
+    pub principal_from_return: Option<bool>, // auth: principal is the call's return value
+    pub principal_expr: Option<String>, // auth: template to reach the principal from the captured value
     pub strategy: &'static str,
 }
 
@@ -102,6 +130,32 @@ pub fn load_signatures(path: &Path) -> Result<Vec<Signature>, Box<dyn Error>> {
                 .and_then(|i| i.as_u64())
                 .map(|i| i as usize);
 
+            let resource_arg: Option<usize> = entry
+                .get("resource_arg")
+                .and_then(|i| i.as_u64())
+                .map(|i| i as usize);
+
+            let resource_prefix: Option<String> = entry
+                .get("resource_prefix")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
+
+            let resource_from_return: Option<bool> =
+                entry.get("resource_from_return").and_then(|b| b.as_bool());
+
+            let resource_expr: Option<String> = entry
+                .get("resource_expr")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
+
+            let principal_from_return: Option<bool> =
+                entry.get("principal_from_return").and_then(|b| b.as_bool());
+
+            let principal_expr: Option<String> = entry
+                .get("principal_expr")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
+
             let behavior: Option<String> = entry
                 .get("behavior")
                 .and_then(|b| b.as_str())
@@ -118,6 +172,12 @@ pub fn load_signatures(path: &Path) -> Result<Vec<Signature>, Box<dyn Error>> {
                 prompt_role,
                 result_index,
                 request_index,
+                resource_arg,
+                resource_prefix,
+                resource_from_return,
+                resource_expr,
+                principal_from_return,
+                principal_expr,
                 behavior,
             });
         }
@@ -178,6 +238,14 @@ pub fn match_callsite(
     data: &[Signature],
 ) -> Option<SecurityPoint> {
     let demangled = format!("{:#}", demangle(&strip_symbol(callee_mangled)));
+    // Debug: dump every callee whose demangled name contains AFG_DUMP_CALLEES, so
+    // the exact symbol of an elusive call (e.g. an async_trait DAO method) can be
+    // read off and cataloged. Off unless the env var is set.
+    if let Ok(filt) = std::env::var("AFG_DUMP_CALLEES") {
+        if !filt.is_empty() && demangled.contains(&filt) {
+            eprintln!("[AFG-CALLEE] {demangled}  (in {})", format!("{:#}", demangle(&strip_symbol(caller))));
+        }
+    }
     let candidates = candidate_paths(&demangled);
 
     // Match order: LLM, then access-control, then data-store. First hit wins, so a
@@ -208,6 +276,12 @@ pub fn match_callsite(
         prompt_arg_index: sig.prompt_arg_index,
         prompt_role: sig.prompt_role.clone(),
         request_index: sig.request_index,
+        resource_arg: sig.resource_arg,
+        resource_prefix: sig.resource_prefix.clone(),
+        resource_from_return: sig.resource_from_return,
+        resource_expr: sig.resource_expr.clone(),
+        principal_from_return: sig.principal_from_return,
+        principal_expr: sig.principal_expr.clone(),
         strategy,
     })
 }
@@ -241,7 +315,51 @@ fn candidate_paths(demangled: &str) -> Vec<String> {
         }
     }
 
+    // For `async fn`, the call resolves to the compiler-generated coroutine body, whose
+    // demangled path ends in `::{{closure}}` / `::{async_fn#0}` / `::{closure#N}`. Add a
+    // variant with those trailing compiler-generated segments stripped so a call to
+    // `Type::method::{{closure}}` still matches the catalog entry `Type::method`.
+    let mut extra = Vec::new();
+    for cand in &out {
+        let stripped = strip_coroutine_suffix(cand);
+        if stripped.len() != cand.len() && !out.contains(&stripped) {
+            extra.push(stripped);
+        }
+    }
+    out.extend(extra);
+
     out
+}
+
+/// Demangle a raw symbol and reduce it to a catalog `Type::method` short name (turbofish and
+/// trailing coroutine segments stripped, last two path segments). Used by guard inference to
+/// name an inferred check function the same way the catalog matcher does.
+pub(crate) fn callee_short_name(symbol: &str) -> String {
+    let demangled = format!("{:#}", demangle(&strip_symbol(symbol)));
+    let stripped = strip_coroutine_suffix(&strip_turbofish(&demangled));
+    last_two(&stripped).to_string()
+}
+
+/// The crate (first path segment) of a demangled, de-turbofished path.
+pub(crate) fn path_crate(symbol: &str) -> String {
+    let demangled = format!("{:#}", demangle(&strip_symbol(symbol)));
+    let d = strip_turbofish(&demangled);
+    d.split("::").next().unwrap_or("").to_string()
+}
+
+/// Remove trailing compiler-generated path segments (`{{closure}}`, `{closure#N}`,
+/// `{async_fn#N}`, `{async_block#N}`, ...). A real Rust path segment never starts with `{`,
+/// so stripping trailing `::{...}` segments is safe and recovers the user-named method.
+fn strip_coroutine_suffix(path: &str) -> String {
+    let mut cur = path;
+    while let Some(idx) = cur.rfind("::") {
+        if cur[idx + 2..].starts_with('{') {
+            cur = &cur[..idx];
+        } else {
+            break;
+        }
+    }
+    cur.to_string()
 }
 
 /// split `Type as Trait` at the top-level ` as ` (ignoring any inside nested `<...>`)
@@ -356,6 +474,12 @@ mod tests {
             prompt_role: None,
             result_index: None,
             request_index: None,
+            resource_arg: None,
+            resource_prefix: None,
+            resource_from_return: None,
+            resource_expr: None,
+            principal_from_return: None,
+            principal_expr: None,
             behavior: None,
         }
     }
@@ -391,6 +515,43 @@ mod tests {
     #[test]
     fn strips_method_level_generics() {
         assert!(matches("app::foo::Bar::baz<i32>", "foo::Bar::baz"));
+    }
+
+    // ---- async methods: the call resolves to the coroutine body ----
+
+    #[test]
+    fn async_method_closure_suffix_matches() {
+        // vaultwarden's `cipher.is_accessible_to_user(..).await` resolves to the coroutine
+        // body `Cipher::is_accessible_to_user::{{closure}}`; it must still match.
+        assert!(matches(
+            "vaultwarden::db::models::cipher::Cipher::is_accessible_to_user::{{closure}}",
+            "Cipher::is_accessible_to_user"
+        ));
+    }
+
+    #[test]
+    fn async_fn_env_suffix_matches() {
+        assert!(matches(
+            "app::db::Cipher::find_by_user::{async_fn#0}",
+            "Cipher::find_by_user"
+        ));
+    }
+
+    #[test]
+    fn nested_closure_suffixes_match() {
+        assert!(matches(
+            "app::db::Cipher::to_json::{{closure}}::{{closure}}",
+            "Cipher::to_json"
+        ));
+    }
+
+    #[test]
+    fn strip_coroutine_suffix_leaves_normal_paths() {
+        // a normal path is unchanged (no trailing `{...}` segment)
+        assert_eq!(
+            strip_coroutine_suffix("app::db::Cipher::find_by_user"),
+            "app::db::Cipher::find_by_user"
+        );
     }
 
     // ---- trait dispatch `<Type as Trait>::method` ----
@@ -516,6 +677,12 @@ mod tests {
             prompt_role: None,
             result_index: None,
             request_index: None,
+            resource_arg: None,
+            resource_prefix: None,
+            resource_from_return: None,
+            resource_expr: None,
+            principal_from_return: None,
+            principal_expr: None,
             behavior: None,
         }
     }

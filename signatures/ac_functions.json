@@ -1,7 +1,7 @@
 {
     "_schema_notes": {
         "purpose": "Reference dataset of access-control (authentication/authorization) entry-point functions for Rust programs, the AC-finder counterpart to llm_api_functions.json. Used by find_ac_points to scan a RUPTA MIR dump for calls into known auth/authz crates so a reviewer can quickly enumerate every access-control decision point in a codebase.",
-        "usage": "find_ac_points matches MIR call sites against fn_name using the same three-strategy regex approach as find_llm_calls (direct / angle-bracket / short-name — see llm_api_finder.rs for the exact matching rules, reused verbatim by ac_finder.rs).",
+        "usage": "find_ac_points matches MIR call sites against fn_name using the same three-strategy regex approach as find_llm_calls (direct / angle-bracket / short-name - see llm_api_finder.rs for the exact matching rules, reused verbatim by ac_finder.rs).",
         "match_rule": "same textual match as llm_api_functions.json: direct path match, angle-bracket turbofish match, or last-two-segment short-name match against the MIR callee text",
         "category_values": "authentication | authorization | policy-enforcement | raw-http",
         "verification_caveat": "These signatures come from general knowledge of each crate's public API shape and have not been independently re-verified against current published docs (no context7/docs.rs lookup was performed when this file was authored). Spot-check against the target's actual installed crate version before trusting a match."
@@ -28,6 +28,32 @@
             "return_type": "&str",
             "parameter_type": ["&self"],
             "verified_via": "general-knowledge"
+        }
+    ],
+
+    "lemmy": [
+        {
+            "fn_name": "lemmy_api_common::claims::Claims::validate",
+            "category": "authentication",
+            "return_type": "LemmyResult<LocalUserId>",
+            "parameter_type": ["jwt", "context"],
+            "principal_from_return": true,
+            "principal_expr": "{}",
+            "verified_via": "lemmy-0.19.0-source",
+            "taint_role": "Per-request JWT validation; returns the authenticated LocalUserId, which is the principal. The call is wrapped to capture its return and establish the task principal for the whole request. Matched by short-name Claims::validate."
+        }
+    ],
+
+    "dufs": [
+        {
+            "fn_name": "dufs::auth::AccessControl::guard",
+            "category": "authentication",
+            "return_type": "(Option<String>, Option<AccessPaths>)",
+            "parameter_type": ["self", "path", "method", "authorization", "guard_options"],
+            "principal_from_return": true,
+            "principal_expr": "{}.0",
+            "verified_via": "dufs-ir",
+            "taint_role": "dufs authenticates each request in AccessControl::guard, which returns (Option<username>, access paths). The username (ret.0) is the principal; it is established per request at the top of the handler and threaded into every file access, so capturing it from the return establishes the task principal. Short-name AccessControl::guard matches the method call."
         }
     ],
 
@@ -122,7 +148,7 @@
             "return_type": "Result<Header, Error>",
             "parameter_type": ["&str"],
             "verified_via": "general-knowledge",
-            "taint_role": "reads the unverified header only (e.g. to pick a key id) — not itself a verification step, but commonly sits right before jsonwebtoken::decode"
+            "taint_role": "reads the unverified header only (e.g. to pick a key id) - not itself a verification step; but commonly sits right before jsonwebtoken::decode"
         }
     ],
 

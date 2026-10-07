@@ -214,6 +214,17 @@ impl<'m> PANode<'m> {
         }
     }
 
+    /// For an SSA-value node, its `(enclosing function, value name)`, where the value name
+    /// is rendered the way it appears in the IR (e.g. `%data_res`). Returns `None` for
+    /// non-SSA nodes or SSA nodes with no known function. Used to look the value up in the
+    /// debug-info type recovery (`rail_rs::debuginfo`).
+    pub fn ssa_ref(&self) -> Option<(&str, String)> {
+        match &self.kind {
+            PANodeKind::SSAValue { function: Some(f), name, .. } => Some((f.as_str(), name.to_string())),
+            _ => None,
+        }
+    }
+
     /// Whether this node can stand for a shared store HANDLE: an object or a
     /// pointer-to-global that a data-access call takes as an argument (a `&Pool`, a
     /// `&Transaction`, a static connection handle). Used as the fallback resource
@@ -675,8 +686,17 @@ impl<'m> PointerAssignmentGraph<'m> {
             let seed_crate = parse_app_crate(&main_name);
             pag.seed_app_crate_entry_points(&seed_crate);
         } else {
-            println!("[PAG] warning: cannot find main function (set AFG_APP_CRATE to analyze a library crate); no constraints discovered");
-            return pag;
+            // No `main` (a library crate analyzed on its own). Infer the app crate as the
+            // non-runtime crate defining the most functions, and seed its entry points. Set
+            // AFG_APP_CRATE to override if the inference is wrong.
+            let inferred = pag.infer_app_crate();
+            if inferred.is_empty() {
+                println!("[PAG] warning: no main and could not infer an app crate (set AFG_APP_CRATE); no constraints discovered");
+                return pag;
+            }
+            println!("[PAG] no main found; inferred app crate = {:?} (set AFG_APP_CRATE to override)", inferred);
+            pag.app_crate = inferred.clone();
+            pag.seed_app_crate_entry_points(&inferred);
         }
 
         println!(
@@ -718,14 +738,45 @@ impl<'m> PointerAssignmentGraph<'m> {
     /// heuristics here: my compiled ir all have the following string in main:
     /// _ZN4main4main17h
     fn find_main_function_name(&self) -> Option<String> {
-        // Rust-mangled main usually contains "main4main" or ends around "4main".
+        // Rust-mangled `<crate>::main` is `_ZN<len><crate>4main17h..E`: the segment is
+        // exactly "main" (length 4), so match "4main17h" rather than a loose "main17h"
+        // (which false-matches monomorphized library symbols like `..foo_main17h..`).
         for name in self.functions_by_name.keys() {
-            if name.contains("main4main") || name.contains("main17h") {
+            if name.contains("4main17h") {
                 return Some(name.to_string());
             }
         }
-
         None
+    }
+
+    /// Infer the application crate when there is no `main` (a library crate compiled on its
+    /// own, e.g. a framework-dispatched web app or a single data-access crate): the
+    /// non-runtime crate that defines the most functions in the module(s).
+    fn infer_app_crate(&self) -> String {
+        // Count each non-runtime crate's own concrete definitions. A dependency's code appears
+        // here only as generic instantiations (monomorphizations carry a `$LT$...$GT$` type
+        // argument), whereas the crate under analysis contributes its own non-generic
+        // functions. Counting non-generic definitions therefore favors the application crate
+        // over an ORM/runtime dependency that happens to be monomorphized many times.
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+        for (name, func) in &self.functions_by_name {
+            if func.basic_blocks.is_empty() {
+                continue; // a declaration, not a definition
+            }
+            if name.contains("$LT$") {
+                continue; // a generic instantiation (e.g. a dependency monomorphized here)
+            }
+            let c = parse_app_crate(name);
+            if c.is_empty() || is_runtime_crate(&c) {
+                continue;
+            }
+            *counts.entry(c).or_default() += 1;
+        }
+        counts
+            .into_iter()
+            .max_by_key(|(_, n)| *n)
+            .map(|(c, _)| c)
+            .unwrap_or_default()
     }
 
     /// Seed every app-crate, non-skipped function as a Global root so that
@@ -4736,6 +4787,70 @@ fn named_struct_name(receiver_ty: &TypeRef) -> Option<String> {
 /// parse the crate name from a Rust legacy-mangled symbol: `_ZN<len><crate>...`.
 /// e.g. `_ZN11llm_ac_demo4main17h..E` -> `llm_ac_demo`. returns "" if it does not
 /// look like a `_ZN`-mangled symbol (selective-context gate then disables).
+/// Crates that are language runtime / ubiquitous infrastructure, never the application under
+/// analysis. Used by app-crate inference to skip them when counting defined functions.
+fn is_runtime_crate(c: &str) -> bool {
+    matches!(
+        c,
+        "core"
+            | "std"
+            | "alloc"
+            | "compiler_builtins"
+            | "proc_macro"
+            | "test"
+            | "backtrace"
+            | "gimli"
+            | "addr2line"
+            | "object"
+            | "miniz_oxide"
+            | "adler"
+            | "adler2"
+            | "panic_unwind"
+            | "panic_abort"
+            | "unwind"
+            | "libc"
+            | "rustc_demangle"
+            | "rustc_std_workspace_core"
+            | "hashbrown"
+    )
+}
+
+/// Detect the application crate from a set of modules, before building the PAG: the crate of
+/// `<crate>::main` if present, else the non-runtime crate that defines the most non-generic
+/// functions. Mirrors the PAG's own detection; exposed so the producer can scope guard
+/// inference to the application crate.
+pub fn detect_app_crate<'a>(modules: impl IntoIterator<Item = &'a Module>) -> String {
+    let modules: Vec<&Module> = modules.into_iter().collect();
+    for m in &modules {
+        for f in &m.functions {
+            if f.name.contains("4main17h") {
+                let c = parse_app_crate(&f.name);
+                if !c.is_empty() {
+                    return c;
+                }
+            }
+        }
+    }
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for m in &modules {
+        for f in &m.functions {
+            if f.basic_blocks.is_empty() || f.name.contains("$LT$") {
+                continue;
+            }
+            let c = parse_app_crate(&f.name);
+            if c.is_empty() || is_runtime_crate(&c) {
+                continue;
+            }
+            *counts.entry(c).or_default() += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .max_by_key(|(_, n)| *n)
+        .map(|(c, _)| c)
+        .unwrap_or_default()
+}
+
 fn parse_app_crate(mangled: &str) -> String {
     let s = util::normalize_function_name(mangled).trim_start_matches('_');
     let Some(rest) = s.strip_prefix("ZN") else {
