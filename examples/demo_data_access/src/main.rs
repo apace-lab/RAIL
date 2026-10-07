@@ -239,7 +239,8 @@ async fn handle(req: Request) -> String {
 
     // data-read: query the shared table for this prompt (AFG inserts afg_access
     // here from the catalog; there is no hand-written macro).
-    let hit = sqlx::query(&req.prompt).fetch_one(POOL);
+    let hit = sqlx::query(&req.prompt)
+        .fetch_one(POOL);
     if let Some(row) = hit {
         if row.owner_user_id != session.user_id {
             println!(
@@ -259,7 +260,9 @@ async fn handle(req: Request) -> String {
         answer: answer.clone(),
     };
     // data-write: insert the row (AFG inserts afg_access here from the catalog).
-    let _ = sqlx::query(&req.prompt).with_row(row).execute(POOL);
+    let _ = sqlx::query(&req.prompt)
+        .with_row(row)
+        .execute(POOL);
     answer
 }
 

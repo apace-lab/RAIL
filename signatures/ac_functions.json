@@ -143,6 +143,30 @@
         }
     ],
 
+    "appflowy-access-control": [
+        {
+            "fn_name": "access_control::collab::CollabAccessControl::enforce_action",
+            "category": "policy-enforcement",
+            "return_type": "Result<()>",
+            "parameter_type": ["&self", "workspace_id", "uid", "object_id", "Action"],
+            "verified_via": "source"
+        },
+        {
+            "fn_name": "access_control::collab::CollabAccessControl::enforce_access_level",
+            "category": "policy-enforcement",
+            "return_type": "Result<()>",
+            "parameter_type": ["&self", "workspace_id", "uid", "object_id", "AFAccessLevel"],
+            "verified_via": "source"
+        },
+        {
+            "fn_name": "access_control::workspace::WorkspaceAccessControl::enforce_action",
+            "category": "policy-enforcement",
+            "return_type": "Result<()>",
+            "parameter_type": ["&self", "uid", "workspace_id", "Action"],
+            "verified_via": "source"
+        }
+    ],
+
     "oso": [
         {
             "fn_name": "oso::Oso::is_allowed",

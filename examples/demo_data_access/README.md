@@ -65,13 +65,25 @@ cd ../afg_prototype/afg-dashboard
 cargo run -- --run-dir /tmp/afg_data_run   # then open http://127.0.0.1:8090
 ```
 
-## Note on the replay verdict
+## Note on the replay verdict (resource-linked)
 
-The replay verdicts here are `not reproduced`, and that is correct. AFG's
-write-then-read verdict looks for a write and a read on the **same** PANode. For
-a real database the write (`execute`) and the read (`fetch_one`) are different
-methods, so they are different nodes; the leak spans two nodes (write on the
-execute node, read on the fetch_one node) linked through the shared table. The
-single-node write-then-read verdict is what `demo_dynamic` shows with its one
-hand-marked cache node. Here the cross-user overlap on the shared table and the
-runtime leak are the signal.
+A real database's write (`execute`) and read (`fetch_one`) are different methods,
+so they land on different PANodes; the leak spans two nodes linked through the
+shared store. The original single-PANode write-then-read verdict could not see
+that and reported `not reproduced`.
+
+The producer now resolves a RESOURCE id for each data-access site (the shared
+store its arguments alias, via points-to; here the `POOL` handle), so `execute`
+and `fetch_one` get the SAME resource id even though their PANodes differ. The
+instrumenter emits it (`afg_access!(... resource = "res:942")`) and the scheduler
+links the write and the read on that resource. So the replay now reports:
+
+```
+schedule 000: LEAK REPRODUCED (alice wrote resource res:942, then bob read it)
+replay verdict: 1/4 schedule(s) reproduced a cross-user leak
+```
+
+The remaining single-PANode schedules stay `not reproduced` (correctly: no single
+node carries both the write and the read). This is the resource-linked verdict
+(Option A), validated end to end on a store whose write and read are distinct
+methods.

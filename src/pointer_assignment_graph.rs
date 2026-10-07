@@ -213,6 +213,29 @@ impl<'m> PANode<'m> {
             _ => None,
         }
     }
+
+    /// Whether this node can stand for a shared store HANDLE: an object or a
+    /// pointer-to-global that a data-access call takes as an argument (a `&Pool`, a
+    /// `&Transaction`, a static connection handle). Used as the fallback resource
+    /// id when the store object itself is not exposed through the call's points-to
+    /// (e.g. a stub that hides its table behind a global and passes only a marker
+    /// handle). Scalar constants (an int length, a flag) are NOT handles.
+    pub fn is_store_handle(&self) -> bool {
+        match &self.kind {
+            PANodeKind::GlobalObject { .. }
+            | PANodeKind::GlobalAddress { .. }
+            | PANodeKind::HeapObject { .. }
+            | PANodeKind::AllocaObject { .. }
+            | PANodeKind::ReceiverObject { .. }
+            | PANodeKind::FieldObject { .. } => true,
+            PANodeKind::Constant { op } => matches!(
+                op,
+                llvm_ir::Operand::ConstantOperand(c)
+                    if matches!(c.as_ref(), llvm_ir::constant::Constant::GlobalReference { .. })
+            ),
+            _ => false,
+        }
+    }
 }
 
 impl<'m> PANodeKind<'m> {
@@ -2907,6 +2930,16 @@ impl<'m> PointerAssignmentGraph<'m> {
                 };
 
                 if let Some(kind) = kind {
+                    // All of the call's argument nodes, ordered by index, so the
+                    // producer can resolve the shared store handle from among them.
+                    let mut all_args: Vec<(usize, PANodeId)> = idx2arg_nodeid
+                        .iter()
+                        .map(|(&idx, &node_id)| (idx, node_id))
+                        .collect();
+                    all_args.sort_by_key(|(idx, _)| *idx);
+                    let store_arg_nodes: Vec<PANodeId> =
+                        all_args.into_iter().map(|(_, node_id)| node_id).collect();
+
                     let semantic_point = SemanticPoint {
                         callsite_id: callsite.id,
                         kind,
@@ -2918,6 +2951,7 @@ impl<'m> PointerAssignmentGraph<'m> {
                         caller_context: caller_context.clone(),
 
                         argument_nodes: related_nodeids,
+                        store_arg_nodes,
                         result_node: result_id,
                     };
 
