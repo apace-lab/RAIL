@@ -105,7 +105,7 @@ impl fmt::Display for SemanticPoint {
     }
 }
 
-pub struct TaintAnalysis<'m> {
+pub struct PrincipalSensitiveAnalysis<'m> {
     callsites: BTreeMap<usize, PACallSite<'m>>,
     pub functions_by_name: BTreeMap<String, &'m llvm_ir::Function>,
     pub semantic_points: Vec<SemanticPoint>,
@@ -135,7 +135,7 @@ pub struct TaintAnalysis<'m> {
     pub app_crate: String,
 }
 
-impl<'m> TaintAnalysis<'m> {
+impl<'m> PrincipalSensitiveAnalysis<'m> {
     // pub fn new(pag: &'m PointerAssignmentGraph<'m>) -> Self {
     //     let outgoing = Self::build_outgoing_edges(&pag.edges);
     //     let (callsites_by_block, _callee2callsites) = Self::build_calls(&pag.callsites);
@@ -203,7 +203,7 @@ impl<'m> TaintAnalysis<'m> {
         self.propagate_data_contexts(&mut worklist);
     }
 
-    ///////// preparing taint analysis from pag /////////////
+    ///////// preparing principal-sensitive analysis (PSA) from pag /////////////
 
     fn build_semantic_point_index(&mut self) {
         for (point_index, point) in self.semantic_points.iter().enumerate() {
@@ -502,7 +502,7 @@ impl<'m> TaintAnalysis<'m> {
         return PAContext::Global;
     }
 
-    ///////////// logic of taint analysis /////////////////
+    ///////////// logic of principal-sensitive analysis (PSA) /////////////////
 
     fn seed_authenticated_functions(&mut self) {
         let mut seeds = Vec::new();

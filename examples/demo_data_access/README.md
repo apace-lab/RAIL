@@ -42,7 +42,7 @@ LLVM_SYS_191_PREFIX=/opt/homebrew/opt/llvm@19 \
 To see what AFG inserted (none of it is in this source):
 
 ```sh
-grep -n 'afg_runtime::' /tmp/afg_data_run/instrumented/app/src/main.rs
+grep -n 'afg_r4_runtime::' /tmp/afg_data_run/instrumented/app/src/main.rs
 ```
 
 ## What it demonstrates

@@ -1,0 +1,29 @@
+{
+    "_schema_notes": {
+        "purpose": "SERVE-SITE capture rules. Some handlers serve a WHOLE COLLECTION of rows at once (vaultwarden's _get_org_details serves every org cipher via Cipher::find_by_org), so the per-instance leak signal is not one bound value (the source-DAO case) but one access PER served row. afg_instrument's serve-capture pass (inject_serve_captures) anchors right after a `let <binding> = <..call..>;` and injects a loop over an in-scope served collection (items_expr), emitting one resource-linked afg_access per served item: the per-item resource instance, the served row count, the principal captured DIRECTLY at the site (no task-local / upstream afg_auth needed, which matters because the vulnerable path has no auth probe by construction), and a data-model authorized grant. This file keeps all app specifics as DATA, not code.",
+        "usage": "Loaded by afg_instrument::load_serve_capture_rules (skips the _schema_notes key); passed to instrument_project alongside the source-DAO rules. Each group key (e.g. an app name) maps to a list of rules.",
+        "fields": {
+            "call": "Qualified `Type::method` of the `let`-binding to anchor the capture AFTER (matched structurally through ?/await/&/parens). Pick a `let` where the served collection, the principal, and any data-model helper are all in scope.",
+            "items_expr": "Expression for the served collection to iterate (e.g. \"ciphers\"). Iterated by .iter(), so the handler's own later consumption of it is unaffected.",
+            "kind": "\"Read\" (a serve; the leak-exposing direction) or \"Write\".",
+            "prefix": "OPTIONAL resource label override. When omitted it is INFERRED as the lowercased element-type name of the served collection (the `Type` of the `let <items_expr> = Type::method(..)` binding). Same instance links by `<prefix>:<id>` across principals.",
+            "item_id_expr": "OPTIONAL per-item resource id override (`{item}` = loop var). When omitted it is INFERRED from the served element type's recovered DWARF struct layout by picking its id field by naming convention (uuid / id / <type>_id); a newtype element uses the item itself.",
+            "count": "REMOVED (now inferred). The injection loops once per served row, so each access is exactly 1 row; no per-app value is needed.",
+            "principal_param": "Handler parameter carrying the authenticated user (e.g. \"user_id\"); the principal (and grant) is emitted only in functions that expose it, so non-handler matches still compile. Also gates and seeds the principal inference.",
+            "principal_expr": "OPTIONAL principal expression override. When omitted (but principal_param is set) it is INFERRED by a principal-TYPE classifier over the handler parameter types: the identity-typed parameter (UserId / *Headers guard / Claims / ...) with its id field appended (a newtype identity uses the parameter itself).",
+            "authorized_expr": "Optional `Vec<String>` expression declaring, per served item, the principals authorized for it from the resource's OWN DATA MODEL (collection membership), with `{item}`, `{binding}`, `{principal}` substituted. NOT the handler's (vulnerable) serve decision: it consults the collection-membership map the vulnerable serve fails to consult. The LEAK VERDICT is still rendered by afg_observe (comparing readers against the union of grants), not by this probe."
+        },
+        "caveat": "These rules name an app's own serve method, served collection, and handler conventions, so the ANCHOR (call + items_expr + kind), the principal_param gating, and the authorized grant remain per-app config (DATA, like the library entries in the other catalogs). count/resource/principal are now INFERRED by afg_instrument: count is structural (per-row loop), resource is the served element type's id field (source element type + DWARF struct layout), principal is the identity-typed handler parameter (principal-type classifier). Inference falls back to a declared value when present and is skipped+reported (never forced wrong) when it cannot resolve. The remaining residue is the authorized grant (names the resource's membership data model) and the principal_param gating. The STATIC stage already auto-selected the serve site; this catalog only says WHAT to record there."
+    },
+
+    "vaultwarden": [
+        {
+            "call": "CipherSyncData::new",
+            "items_expr": "ciphers",
+            "kind": "Read",
+            "principal_param": "user_id",
+            "authorized_expr": "if {binding}.cipher_collections.get(&{item}.uuid).is_some() { vec![format!(\"{:?}\", {principal})] } else { Vec::new() }",
+            "_note": "_get_org_details (CVE-2026-26012). TRIMMED rule: count, resource (prefix + item_id_expr), and principal (principal_expr) are now INFERRED by afg_instrument, not declared. Only the anchor (call + items_expr + kind), the principal_param gating (scopes injection to the handler that exposes `user_id`, keeping the sync sibling uninstrumented), and the data-model authorized grant remain. The anchor is the `let cipher_sync_data = CipherSyncData::new(user_id, ...)` that sits just after the vulnerable `let ciphers = Cipher::find_by_org(org_id, conn)` serve, so `ciphers`, `user_id`, and `cipher_sync_data` are all in scope. Inference derives: prefix `cipher` and id field `uuid` from the served element type `Cipher` (recovered from the `ciphers` binding) and its DWARF struct layout; principal `user_id` from the identity-typed `user_id: &UserId` parameter (a newtype, so the param itself); count 1 from the per-row loop. The authorized grant declares [user_id] IFF this user is a member of a collection that contains the cipher (cipher_sync_data.cipher_collections, reflecting the users_collections membership table the vulnerable find_by_org ignores); the probe records membership FACTS, afg_observe renders the verdict."
+        }
+    ]
+}

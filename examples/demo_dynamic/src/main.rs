@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use afg_runtime::{with_afg_context, AfgContext};
+use afg_r4_runtime::{with_afg_context, AfgContext};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
@@ -196,8 +196,8 @@ async fn handle(req: Request) -> String {
     let _ = session.role;
 
     if let Some(entry) = cache().lock().unwrap().get(&req.prompt).cloned() {
-        afg_runtime::afg_monitor!(function = CACHE_FN);
-        afg_runtime::afg_access!(node = CACHE_NODE, kind = afg_runtime::AccessKind::Read, function = CACHE_FN);
+        afg_r4_runtime::afg_monitor!(function = CACHE_FN);
+        afg_r4_runtime::afg_access!(node = CACHE_NODE, kind = afg_r4_runtime::AccessKind::Read, function = CACHE_FN);
         if entry.owner_user_id != session.user_id {
             println!(
                 "[leak] {} served a cached answer owned by {}",
@@ -210,8 +210,8 @@ async fn handle(req: Request) -> String {
     let client = async_openai::Client::new();
     let answer = client.chat().create(&req.prompt);
 
-    afg_runtime::afg_monitor!(function = CACHE_FN);
-    afg_runtime::afg_access!(node = CACHE_NODE, kind = afg_runtime::AccessKind::Write, function = CACHE_FN);
+    afg_r4_runtime::afg_monitor!(function = CACHE_FN);
+    afg_r4_runtime::afg_access!(node = CACHE_NODE, kind = afg_r4_runtime::AccessKind::Write, function = CACHE_FN);
     cache().lock().unwrap().insert(
         req.prompt.clone(),
         CacheEntry {

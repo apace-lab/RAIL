@@ -367,6 +367,54 @@ impl DebugTypes {
         Some(StructLayout { name: comp.name.clone(), size_bits: comp.size_bits, members })
     }
 
+    /// Build an index from struct type NAME to its field names, for every recovered
+    /// composite. Keyed on both the full DWARF name (e.g. `vaultwarden::db::models::cipher::Cipher`)
+    /// and its last `::` segment (e.g. `Cipher`), so a source-side consumer can look a type up
+    /// by the short name it reads from source. When several composites share a short name
+    /// (generic instantiations), the one that carries a recognizable row-id field
+    /// (`uuid`/`id`/`<name>_id`) wins, so the real data row beats a zero-sized marker struct.
+    /// This is what lets the serve-capture inference pick a row's id field by naming
+    /// convention without re-threading LLVM metadata ids into the source rewriter.
+    pub fn struct_field_index(&self) -> HashMap<String, Vec<String>> {
+        let mut out: HashMap<String, Vec<String>> = HashMap::new();
+        let looks_like_row = |name: &str, fields: &[String]| -> bool {
+            let short = name.rsplit("::").next().unwrap_or(name).to_ascii_lowercase();
+            fields.iter().any(|f| {
+                let f = f.to_ascii_lowercase();
+                f == "uuid" || f == "id" || f == format!("{short}_id") || f == format!("{short}id")
+            })
+        };
+        let mut insert = |key: String, name: &str, fields: &[String]| {
+            match out.get(&key) {
+                None => {
+                    out.insert(key, fields.to_vec());
+                }
+                Some(existing) => {
+                    // Prefer a candidate that carries a row-id field over one that does not.
+                    if looks_like_row(name, fields) && !looks_like_row(&key, existing) {
+                        out.insert(key, fields.to_vec());
+                    }
+                }
+            }
+        };
+        for (&id, comp) in &self.composites {
+            let fields: Vec<String> = match self.struct_layout(id) {
+                Some(l) => l.members.into_iter().map(|m| m.name).collect(),
+                None => continue,
+            };
+            if fields.is_empty() {
+                continue;
+            }
+            insert(comp.name.clone(), &comp.name, &fields);
+            if let Some(last) = comp.name.rsplit("::").next() {
+                if last != comp.name {
+                    insert(last.to_string(), &comp.name, &fields);
+                }
+            }
+        }
+        out
+    }
+
     /// The composite (struct) that an SSA value's debug type resolves to, if any.
     /// `value` is the SSA name without the leading `%` (and `.dbg.spill` is tolerated).
     pub fn value_composite(&self, func: &str, value: &str) -> Option<MetaId> {
@@ -1172,5 +1220,34 @@ define void @coro(ptr %_1) !dbg !1 {
 "#;
         let dt = DebugTypes::parse_str(ll);
         assert_eq!(dt.strip_to_composite(1), None);
+    }
+
+    #[test]
+    fn struct_field_index_keys_full_and_short_names() {
+        let dt = parsed();
+        let idx = dt.struct_field_index();
+        // Keyed by the short name read from source.
+        let fields = idx.get("Resource").expect("Resource indexed by short name");
+        assert_eq!(fields, &vec!["id".to_string(), "data".to_string()]);
+    }
+
+    #[test]
+    fn struct_field_index_prefers_row_bearing_duplicate() {
+        // Two composites share the short name `Cipher`: a zero-field marker and the real
+        // row with a `uuid`. The row-bearing one must win on the short-name key.
+        let ll = r#"
+!10 = !DICompositeType(tag: DW_TAG_structure_type, name: "Cipher", scope: !1, file: !2, size: 64, elements: !11)
+!11 = !{!12}
+!12 = !DIDerivedType(tag: DW_TAG_member, name: "marker", scope: !10, file: !2, baseType: !214, size: 64)
+!20 = !DICompositeType(tag: DW_TAG_structure_type, name: "app::db::Cipher", scope: !1, file: !2, size: 128, elements: !21)
+!21 = !{!22, !23}
+!22 = !DIDerivedType(tag: DW_TAG_member, name: "uuid", scope: !20, file: !2, baseType: !214, size: 64)
+!23 = !DIDerivedType(tag: DW_TAG_member, name: "name", scope: !20, file: !2, baseType: !214, size: 64, offset: 64)
+!214 = !DIBasicType(name: "u64", size: 64, encoding: DW_ATE_unsigned)
+"#;
+        let dt = DebugTypes::parse_str(ll);
+        let idx = dt.struct_field_index();
+        let fields = idx.get("Cipher").expect("Cipher indexed");
+        assert!(fields.contains(&"uuid".to_string()), "row-bearing dup must win: {fields:?}");
     }
 }

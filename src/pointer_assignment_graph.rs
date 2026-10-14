@@ -3,12 +3,12 @@ use crate::context::{
     PAConfig, PAContext, PAContextElem, PAContextMode, PAContextSelectPolicy, PAObjectContextKind,
 };
 use crate::signature::Signature;
-use crate::taint_analysis::SemanticPoint;
-use crate::taint_analysis::SemanticPointKind;
+use crate::psa::SemanticPoint;
+use crate::psa::SemanticPointKind;
 use crate::util;
 use crate::ControlFlowGraph;
 use crate::FunctionsByType;
-use crate::TaintAnalysis;
+use crate::PrincipalSensitiveAnalysis;
 use core::panic;
 use llvm_ir::function::Parameter;
 use llvm_ir::function::ParameterAttribute;
@@ -541,7 +541,7 @@ pub struct PointerAssignmentGraph<'m> {
 
     /// for AFG, the engine to record functions
     pub semantic_points: Vec<SemanticPoint>,
-    pub taint_analysis: Option<TaintAnalysis<'m>>,
+    pub psa: Option<PrincipalSensitiveAnalysis<'m>>,
 }
 
 impl<'m> PointerAssignmentGraph<'m> {
@@ -605,8 +605,8 @@ impl<'m> PointerAssignmentGraph<'m> {
             _ => panic!("no such config."),
         };
 
-        let mut taint_analysis = if config.policy == PAContextSelectPolicy::AFG {
-            Some(TaintAnalysis::new())
+        let mut psa = if config.policy == PAContextSelectPolicy::AFG {
+            Some(PrincipalSensitiveAnalysis::new())
         } else {
             None
         };
@@ -638,7 +638,7 @@ impl<'m> PointerAssignmentGraph<'m> {
             config: config,
             app_crate: String::new(),
             semantic_points: Vec::new(),
-            taint_analysis,
+            psa,
         };
 
         // An explicit app-crate override wins over main detection: it lets us
@@ -663,7 +663,7 @@ impl<'m> PointerAssignmentGraph<'m> {
             println!("[PAG] potential main function: {}", main_name);
 
             // Derive the application crate for all policies (used by selective
-            // context, entry-point seeding, and the taint analysis's execution
+            // context, entry-point seeding, and the principal-sensitive analysis (PSA)'s execution
             // propagation), not only under AppOnly.
             pag.app_crate = parse_app_crate(&main_name);
 
@@ -725,10 +725,10 @@ impl<'m> PointerAssignmentGraph<'m> {
         pag.print_statistics();
 
         // for AFG
-        if let Some(mut taint_analysis) = pag.taint_analysis.take() {
-            taint_analysis.init(&pag);
-            taint_analysis.run();
-            taint_analysis.print_result();
+        if let Some(mut psa) = pag.psa.take() {
+            psa.init(&pag);
+            psa.run();
+            psa.print_result();
         }
 
         pag

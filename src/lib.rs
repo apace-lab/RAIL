@@ -4,9 +4,9 @@
 //! For a more thorough introduction to the crate and how to get started,
 //! see the [crate's README](https://github.com/cdisselkoen/llvm-ir-analysis/blob/main/README.md).
 
-pub mod taint_analysis;
+pub mod psa;
 pub mod debuginfo;
-pub mod dominance;
+pub mod ace;
 mod call_graph;
 mod context;
 mod control_dep_graph;
@@ -18,10 +18,10 @@ pub mod guard_inference;
 pub mod signature;
 pub mod util;
 
-pub use crate::taint_analysis::TaintAnalysis;
+pub use crate::psa::PrincipalSensitiveAnalysis;
 pub use crate::call_graph::CallGraph;
 // Re-export the context types so consumers can read the `pub` context fields
-// exposed by the taint analysis (e.g. `node_contexts` values are `PAContextElem`s).
+// exposed by the principal-sensitive analysis (PSA; e.g. `node_contexts` values are `PAContextElem`s).
 pub use crate::context::{PAContext, PAContextElem};
 pub use crate::control_dep_graph::ControlDependenceGraph;
 pub use crate::control_flow_graph::{CFGNode, ControlFlowGraph};
@@ -56,8 +56,8 @@ pub struct ModuleAnalysis<'m> {
         Vec<signature::Signature>,
         Vec<signature::Signature>,
     )>,
-    /// optional taint analysis for the module, which can be used to detect potential leaks of sensitive information from LLM API calls to access-control sinks
-    taint_analysis: SimpleCache<TaintAnalysis<'m>>,
+    /// optional principal-sensitive analysis (PSA) for the module, which can be used to detect potential leaks of sensitive information from LLM API calls to access-control sinks
+    psa: SimpleCache<PrincipalSensitiveAnalysis<'m>>,
 }
 
 impl<'m> ModuleAnalysis<'m> {
@@ -77,7 +77,7 @@ impl<'m> ModuleAnalysis<'m> {
                 .map(|f| (f.name.as_str(), FunctionAnalysis::new(f)))
                 .collect(),
             context_catalogs: None,
-            taint_analysis: SimpleCache::new(),
+            psa: SimpleCache::new(),
         }
     }
 
@@ -127,13 +127,13 @@ impl<'m> ModuleAnalysis<'m> {
         })
     }
 
-    /// Get the taint analysis for the `Module`: builds the PAG in the given mode,
+    /// Get the principal-sensitive analysis (PSA) for the `Module`: builds the PAG in the given mode,
     /// runs principal/semantic-context propagation, and returns the engine.
     /// Requires the context catalogs to have been set (see `set_context_catalogs`).
-    pub fn taint_analysis(&self, mode: &str, k: Option<usize>) -> Ref<'_, TaintAnalysis<'m>> {
-        self.taint_analysis.get_or_insert_with(move || {
+    pub fn psa(&self, mode: &str, k: Option<usize>) -> Ref<'_, PrincipalSensitiveAnalysis<'m>> {
+        self.psa.get_or_insert_with(move || {
             let pag = self.pointer_assignment_graph(mode, k);
-            let mut engine = TaintAnalysis::new();
+            let mut engine = PrincipalSensitiveAnalysis::new();
             engine.init(&pag);
             engine.run();
             engine
@@ -179,8 +179,8 @@ pub struct CrossModuleAnalysis<'m> {
         Vec<signature::Signature>,
         Vec<signature::Signature>,
     )>,
-    /// optional taint analysis for the module, which can be used to detect potential leaks of sensitive information from LLM API calls to access-control sinks
-    taint_analysis: SimpleCache<TaintAnalysis<'m>>,
+    /// optional principal-sensitive analysis (PSA) for the module, which can be used to detect potential leaks of sensitive information from LLM API calls to access-control sinks
+    psa: SimpleCache<PrincipalSensitiveAnalysis<'m>>,
     /// optional debug-info type recovery, scanned from the textual IR (see
     /// `rail_rs::debuginfo`). Populated by `set_debug_types`; consumed by the dominance
     /// pass to keep resources of different concrete types from binding when opaque-pointer
@@ -207,7 +207,7 @@ impl<'m> CrossModuleAnalysis<'m> {
             functions_by_type: SimpleCache::new(),
             module_analyses,
             context_catalogs: None,
-            taint_analysis: SimpleCache::new(),
+            psa: SimpleCache::new(),
             debug_types: None,
         }
     }
@@ -278,13 +278,13 @@ impl<'m> CrossModuleAnalysis<'m> {
         })
     }
 
-    /// Get the taint analysis for the `Module`(s): builds the PAG in the given mode,
+    /// Get the principal-sensitive analysis (PSA) for the `Module`(s): builds the PAG in the given mode,
     /// runs principal/semantic-context propagation, and returns the engine.
     /// Requires the context catalogs to have been set (see `set_context_catalogs`).
-    pub fn taint_analysis(&self, mode: &str, k: Option<usize>) -> Ref<'_, TaintAnalysis<'m>> {
-        self.taint_analysis.get_or_insert_with(move || {
+    pub fn psa(&self, mode: &str, k: Option<usize>) -> Ref<'_, PrincipalSensitiveAnalysis<'m>> {
+        self.psa.get_or_insert_with(move || {
             let pag = self.pointer_assignment_graph(mode, k);
-            let mut engine = TaintAnalysis::new();
+            let mut engine = PrincipalSensitiveAnalysis::new();
             engine.init(&pag);
             engine.run();
             engine

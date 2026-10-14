@@ -1,7 +1,7 @@
 // Single-user demo for the scheduler's synthesized second user.
 //
 // Only ONE real user (alice) is ever observed, so the static analysis sees a
-// single principal and `afg_scheduler` SYNTHESIZES a second user
+// single principal and `afg_cuie` SYNTHESIZES a second user
 // (`afg-synthetic`). This app makes that synthesis executable: at REPLAY time,
 // and only then (detected via `schedule_contains_principal`, since the schedule
 // is empty during observation), it injects the synthetic user, who re-issues
@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use afg_runtime::{schedule_contains_principal, with_afg_context, AfgContext, SYNTHETIC_PRINCIPAL};
+use afg_r4_runtime::{schedule_contains_principal, with_afg_context, AfgContext, SYNTHETIC_PRINCIPAL};
 
 // Bearer-token auth stand-in; AFG matches jsonwebtoken::decode and (via the
 // producer) takes its first argument as the principal.
@@ -91,8 +91,8 @@ async fn handle(req: Request) -> String {
     };
 
     if let Some(entry) = cache().lock().unwrap().get(&req.prompt).cloned() {
-        afg_runtime::afg_monitor!(function = CACHE_FN);
-        afg_runtime::afg_access!(node = CACHE_NODE, kind = afg_runtime::AccessKind::Read, function = CACHE_FN);
+        afg_r4_runtime::afg_monitor!(function = CACHE_FN);
+        afg_r4_runtime::afg_access!(node = CACHE_NODE, kind = afg_r4_runtime::AccessKind::Read, function = CACHE_FN);
         if entry.owner != sub {
             println!("[leak] {sub} served a cached answer owned by {}", entry.owner);
         }
@@ -101,8 +101,8 @@ async fn handle(req: Request) -> String {
 
     let client = async_openai::Client::new();
     let answer = client.chat().create(&req.prompt);
-    afg_runtime::afg_monitor!(function = CACHE_FN);
-    afg_runtime::afg_access!(node = CACHE_NODE, kind = afg_runtime::AccessKind::Write, function = CACHE_FN);
+    afg_r4_runtime::afg_monitor!(function = CACHE_FN);
+    afg_r4_runtime::afg_access!(node = CACHE_NODE, kind = afg_r4_runtime::AccessKind::Write, function = CACHE_FN);
     cache().lock().unwrap().insert(
         req.prompt.clone(),
         CacheEntry {

@@ -3,7 +3,7 @@ mod llm;
 mod server;
 mod store;
 
-use afg_runtime::{with_afg_context, AfgContext};
+use afg_r4_runtime::{with_afg_context, AfgContext};
 use server::Request;
 
 // A small multi-user LLM service. Users sign in with a password (argon2) and

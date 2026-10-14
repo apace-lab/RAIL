@@ -1,5 +1,6 @@
 //! Structural inference of application access-control checks, so they need not be listed in
-//! the catalog by hand.
+//! the catalog by hand. This feeds the ACE (Access-Control Enforcement) pass: the inferred
+//! checks become synthetic signatures that the enforcement criterion treats like cataloged ones.
 //!
 //! A library catalog (sqlx, diesel, argon2, casbin, ...) generalizes across apps, but an
 //! application's own access-control check is bespoke (e.g. vaultwarden's

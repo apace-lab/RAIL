@@ -1,4 +1,8 @@
-//! Access-control dominance analysis (the automated enforcement pass).
+//! ACE: Access-Control Enforcement (the automated enforcement pass).
+//!
+//! This is AFG's ACE stage. The control-flow dominance mechanism it consumes keeps its
+//! graph name (`DominanceOracle`, `DominanceFacts`, backed by `dominator_tree`); only this
+//! enforcement-criterion layer is named ACE.
 //!
 //! AFG's correctness property is the *dominance invariant*: every access to a shared
 //! resource must be dominated, on all paths, by an access-control check bound to that

@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use afg_runtime::{with_afg_context, AfgContext};
+use afg_r4_runtime::{with_afg_context, AfgContext};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
