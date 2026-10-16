@@ -411,7 +411,7 @@ mod coroutine_tests {
     use crate::DominatorTree;
 
     fn async_fixture() -> String {
-        std::env::var("AFG_ASYNC_LL").unwrap_or_else(|_| {
+        std::env::var("CRUX_ASYNC_LL").unwrap_or_else(|_| {
             format!("{}/tests/fixtures/async_demo_dbg.ll", env!("CARGO_MANIFEST_DIR"))
         })
     }

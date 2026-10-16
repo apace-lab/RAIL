@@ -1,7 +1,7 @@
 // Single-user demo for the scheduler's synthesized second user.
 //
 // Only ONE real user (alice) is ever observed, so the static analysis sees a
-// single principal and `afg_cuie` SYNTHESIZES a second user
+// single principal and `crux_cuie` SYNTHESIZES a second user
 // (`afg-synthetic`). This app makes that synthesis executable: at REPLAY time,
 // and only then (detected via `schedule_contains_principal`, since the schedule
 // is empty during observation), it injects the synthetic user, who re-issues
@@ -11,9 +11,9 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use afg_r4_runtime::{schedule_contains_principal, with_afg_context, AfgContext, SYNTHETIC_PRINCIPAL};
+use crux_r4_runtime::{schedule_contains_principal, with_crux_context, CruxContext, SYNTHETIC_PRINCIPAL};
 
-// Bearer-token auth stand-in; AFG matches jsonwebtoken::decode and (via the
+// Bearer-token auth stand-in; CRUX matches jsonwebtoken::decode and (via the
 // producer) takes its first argument as the principal.
 mod jsonwebtoken {
     pub struct DecodingKey;
@@ -91,8 +91,8 @@ async fn handle(req: Request) -> String {
     };
 
     if let Some(entry) = cache().lock().unwrap().get(&req.prompt).cloned() {
-        afg_r4_runtime::afg_monitor!(function = CACHE_FN);
-        afg_r4_runtime::afg_access!(node = CACHE_NODE, kind = afg_r4_runtime::AccessKind::Read, function = CACHE_FN);
+        crux_r4_runtime::crux_monitor!(function = CACHE_FN);
+        crux_r4_runtime::crux_access!(node = CACHE_NODE, kind = crux_r4_runtime::AccessKind::Read, function = CACHE_FN);
         if entry.owner != sub {
             println!("[leak] {sub} served a cached answer owned by {}", entry.owner);
         }
@@ -101,8 +101,8 @@ async fn handle(req: Request) -> String {
 
     let client = async_openai::Client::new();
     let answer = client.chat().create(&req.prompt);
-    afg_r4_runtime::afg_monitor!(function = CACHE_FN);
-    afg_r4_runtime::afg_access!(node = CACHE_NODE, kind = afg_r4_runtime::AccessKind::Write, function = CACHE_FN);
+    crux_r4_runtime::crux_monitor!(function = CACHE_FN);
+    crux_r4_runtime::crux_access!(node = CACHE_NODE, kind = crux_r4_runtime::AccessKind::Write, function = CACHE_FN);
     cache().lock().unwrap().insert(
         req.prompt.clone(),
         CacheEntry {
@@ -119,8 +119,8 @@ async fn main() {
 
     // The one real user: writes the shared cache. In an observed run this is the
     // only principal, so the scheduler synthesizes a second user.
-    let _ = with_afg_context(
-        AfgContext::default(),
+    let _ = with_crux_context(
+        CruxContext::default(),
         handle(Request {
             token: "alice".to_string(),
             prompt: prompt.clone(),
@@ -133,8 +133,8 @@ async fn main() {
     // skipped then). The synthetic user re-issues alice's prompt and is served
     // alice's cached answer, the leak the synthesized schedule tests.
     if schedule_contains_principal(SYNTHETIC_PRINCIPAL) {
-        let leaked = with_afg_context(
-            AfgContext::default(),
+        let leaked = with_crux_context(
+            CruxContext::default(),
             handle(Request {
                 token: SYNTHETIC_PRINCIPAL.to_string(),
                 prompt,

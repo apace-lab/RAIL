@@ -5,16 +5,16 @@
 // stored row can be served to another. Two users flow through the SAME handler
 // and one token-decode call site, so the static model can't tell them apart.
 //
-// The difference from demo_dynamic: the store access carries NO hand-written AFG
+// The difference from demo_dynamic: the store access carries NO hand-written CRUX
 // macros. It goes through catalog-matching stubs (`sqlx::query::Query::execute`
-// = data-write, `sqlx::query::Query::fetch_one` = data-read) so AFG's producer
-// finds them via data_access_functions.json and inserts afg_access! itself, with
+// = data-write, `sqlx::query::Query::fetch_one` = data-read) so CRUX's producer
+// finds them via data_access_functions.json and inserts crux_access! itself, with
 // the real PANode. This exercises the data-access catalog + dynamic per-user path
-// end to end. `with_afg_context` is the only AFG piece added by hand.
+// end to end. `with_crux_context` is the only CRUX piece added by hand.
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use afg_r4_runtime::{with_afg_context, AfgContext};
+use crux_r4_runtime::{with_crux_context, CruxContext};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
@@ -55,7 +55,7 @@ fn verify_password(password: &str, password_hash: &str) -> bool {
 }
 
 // Bearer-token authentication. `jsonwebtoken` is a deterministic stand-in for the
-// real crate so the demo runs under MadSim; AFG matches jsonwebtoken::decode
+// real crate so the demo runs under MadSim; CRUX matches jsonwebtoken::decode
 // (authentication) and takes its first argument, the token, as the principal.
 mod jsonwebtoken {
     pub struct DecodingKey;
@@ -135,7 +135,7 @@ fn table() -> &'static Mutex<HashMap<String, AnswerRow>> {
     TABLE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-// A minimal sqlx-shaped API. AFG matches `Query::fetch_one` (data-read) and
+// A minimal sqlx-shaped API. CRUX matches `Query::fetch_one` (data-read) and
 // `Query::execute` (data-write) by name; the builder steps around them are not
 // cataloged. The shared TABLE stands in for the connection pool's database.
 mod sqlx {
@@ -237,7 +237,7 @@ async fn handle(req: Request) -> String {
         Err(_) => return String::new(),
     };
 
-    // data-read: query the shared table for this prompt (AFG inserts afg_access
+    // data-read: query the shared table for this prompt (CRUX inserts crux_access
     // here from the catalog; there is no hand-written macro).
     let hit = sqlx::query(&req.prompt)
         .fetch_one(POOL);
@@ -259,7 +259,7 @@ async fn handle(req: Request) -> String {
         owner_username: session.username,
         answer: answer.clone(),
     };
-    // data-write: insert the row (AFG inserts afg_access here from the catalog).
+    // data-write: insert the row (CRUX inserts crux_access here from the catalog).
     let _ = sqlx::query(&req.prompt)
         .with_row(row)
         .execute(POOL);
@@ -274,15 +274,15 @@ async fn main() {
 
     // 2) Two users issue requests through the same handler. Both read the shared
     //    table, so the two principals meet at the same data-access node.
-    let a = tokio::spawn(with_afg_context(
-        AfgContext::default(),
+    let a = tokio::spawn(with_crux_context(
+        CruxContext::default(),
         handle(Request {
             token: alice_token,
             prompt: "summarize alice's notes".to_string(),
         }),
     ));
-    let b = tokio::spawn(with_afg_context(
-        AfgContext::default(),
+    let b = tokio::spawn(with_crux_context(
+        CruxContext::default(),
         handle(Request {
             token: bob_token.clone(),
             prompt: "summarize bob's notes".to_string(),
@@ -292,8 +292,8 @@ async fn main() {
 
     // 3) bob re-issues alice's earlier request and is served alice's stored row.
     //    This is the cross-user leak through the shared table.
-    let leaked = with_afg_context(
-        AfgContext::default(),
+    let leaked = with_crux_context(
+        CruxContext::default(),
         handle(Request {
             token: bob_token,
             prompt: "summarize alice's notes".to_string(),

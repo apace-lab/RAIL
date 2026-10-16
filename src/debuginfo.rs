@@ -1010,8 +1010,8 @@ define void @f(ptr %p) !dbg !1 {
         // Two files that both use low metadata ids (!5, !6, !7, !8, !10) for DIFFERENT
         // structs. Merging must not alias them.
         let dir = std::env::temp_dir();
-        let a = dir.join("afg_dbg_a.ll");
-        let b = dir.join("afg_dbg_b.ll");
+        let a = dir.join("crux_dbg_a.ll");
+        let b = dir.join("crux_dbg_b.ll");
         let file_a = r#"
 define void @fa(ptr %p) !dbg !1 {
     call void @llvm.dbg.declare(metadata ptr %p, metadata !10, metadata !DIExpression())
@@ -1052,7 +1052,7 @@ define void @fb(ptr %q) !dbg !1 {
     }
 
     /// The committed real-IR fixtures (compiled with rustc 1.85/1.86 -> LLVM-19,
-    /// `-C debuginfo=2`), under `rail-rs/tests/fixtures/`. `AFG_*_LL` env vars override.
+    /// `-C debuginfo=2`), under `rail-rs/tests/fixtures/`. `CRUX_*_LL` env vars override.
     fn fixture(env_var: &str, name: &str) -> String {
         std::env::var(env_var).unwrap_or_else(|_| {
             format!("{}/tests/fixtures/{}", env!("CARGO_MANIFEST_DIR"), name)
@@ -1060,10 +1060,10 @@ define void @fb(ptr %q) !dbg !1 {
     }
 
     /// Real-IR validation against the compiled dominance-demo LLVM-19 IR (pure text parse,
-    /// no LLVM needed). Fixture committed under tests/fixtures; `AFG_DEMO_LL` overrides.
+    /// no LLVM needed). Fixture committed under tests/fixtures; `CRUX_DEMO_LL` overrides.
     #[test]
     fn real_demo_ir() {
-        let path = fixture("AFG_DEMO_LL", "dominance_demo_dbg.ll");
+        let path = fixture("CRUX_DEMO_LL", "dominance_demo_dbg.ll");
         let dt = DebugTypes::parse_file(Path::new(&path));
         assert!(!dt.is_empty(), "no debug info recovered");
         eprintln!(
@@ -1105,10 +1105,10 @@ define void @fb(ptr %q) !dbg !1 {
 
     /// Real-IR validation of type propagation through temporaries, on the committed
     /// typegate-demo IR. Loads the module through `llvm-ir` (the crate already links LLVM);
-    /// `AFG_TYPEGATE_LL` overrides the fixture path.
+    /// `CRUX_TYPEGATE_LL` overrides the fixture path.
     #[test]
     fn real_propagation() {
-        let path = fixture("AFG_TYPEGATE_LL", "typegate_demo_dbg.ll");
+        let path = fixture("CRUX_TYPEGATE_LL", "typegate_demo_dbg.ll");
         let dt = DebugTypes::parse_file(Path::new(&path));
         let module = llvm_ir::Module::from_ir_path(&path).expect("parse IR");
         let vt = dt.propagate_types([&module]);
@@ -1189,7 +1189,7 @@ define void @coro(ptr %_1) !dbg !1 {
         // In the complex async demo, get_cipher reloads the captured cipher at both the
         // is_accessible check and the to_json serve; both must resolve to the same env
         // capture offset so the dominance pass can bind them as one resource instance.
-        let path = fixture("AFG_COMPLEX_LL", "complex_dbg.ll");
+        let path = fixture("CRUX_COMPLEX_LL", "complex_dbg.ll");
         let dt = DebugTypes::parse_file(Path::new(&path));
         let m = llvm_ir::Module::from_ir_path(&path).expect("parse complex fixture");
         let vt = dt.propagate_types([&m]);

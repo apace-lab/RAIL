@@ -23,10 +23,10 @@ pub enum PAContextElem {
         id: usize,
     },
 
-    /// AFG used for tracking principal authorization callsites
+    /// CRUX used for tracking principal authorization callsites
     Principal { auth_callsite: usize },
 
-    /// AFG used for tracking LLM API callsites
+    /// CRUX used for tracking LLM API callsites
     LlmApi {
         callsite_id: usize,
         provider: String,
@@ -58,7 +58,7 @@ pub enum PAObjectContextKind {
 pub enum PAContext {
     Global,
     Elements(Vec<PAContextElem>),
-    Semantics(Vec<PAContextElem>), // for AFG, not bounded by k
+    Semantics(Vec<PAContextElem>), // for CRUX, not bounded by k
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,7 +253,7 @@ pub enum PAContextSelectPolicy {
     AppOnly,
     /// when (llm, access-control, data-access) catalogs are provided;
     /// then create context when seeing these functions
-    AFG,
+    CRUX,
 
     /// when (concurrency-related) catalogs are provided;
     /// use origin-sensitive algorithm: create context when seeing thread creation/task creation
@@ -281,7 +281,7 @@ pub struct PAConfig {
     /// which functions we apply context-sensitivity on
     pub policy: PAContextSelectPolicy,
 
-    /// together with AFG:
+    /// together with CRUX:
     /// (llm, access-control, data-store) catalogs; when set, matched call sites are
     /// recorded as context points while the analysis visits calls
     /// default = None
@@ -346,7 +346,7 @@ impl PAConfig {
         }
     }
 
-    pub fn afg(
+    pub fn crux(
         context_signatures: Option<(Vec<Signature>, Vec<Signature>, Vec<Signature>)>,
     ) -> Self {
         Self {
@@ -354,7 +354,7 @@ impl PAConfig {
             on_the_fly: true,
             context_mode: PAContextMode::KCallSite, // TODO: need to update
             default_k: 1,                           // TODO: need to update
-            policy: PAContextSelectPolicy::AFG,
+            policy: PAContextSelectPolicy::CRUX,
             context_signatures: context_signatures,
         }
     }

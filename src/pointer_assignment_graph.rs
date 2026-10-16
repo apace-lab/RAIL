@@ -539,7 +539,7 @@ pub struct PointerAssignmentGraph<'m> {
     /// the (function, context) instantiation blow-up. empty => gate disabled.
     pub app_crate: String,
 
-    /// for AFG, the engine to record functions
+    /// for CRUX, the engine to record functions
     pub semantic_points: Vec<SemanticPoint>,
     pub psa: Option<PrincipalSensitiveAnalysis<'m>>,
 }
@@ -601,11 +601,11 @@ impl<'m> PointerAssignmentGraph<'m> {
             "kcfa" => PAConfig::k_callsite(k.unwrap()),
             "kobj" => PAConfig::k_object(k.unwrap()),
             "kmix" => PAConfig::k_mixed(k.unwrap()),
-            "afg" => PAConfig::afg(context_signatures),
+            "crux" => PAConfig::crux(context_signatures),
             _ => panic!("no such config."),
         };
 
-        let mut psa = if config.policy == PAContextSelectPolicy::AFG {
+        let mut psa = if config.policy == PAContextSelectPolicy::CRUX {
             Some(PrincipalSensitiveAnalysis::new())
         } else {
             None
@@ -645,12 +645,12 @@ impl<'m> PointerAssignmentGraph<'m> {
         // analyze a library crate (a framework-dispatched web app with no reachable
         // main), and avoids the loose main heuristic false-matching a monomorphized
         // symbol (e.g. one containing "domain17h").
-        let app_override = std::env::var("AFG_APP_CRATE")
+        let app_override = std::env::var("CRUX_APP_CRATE")
             .ok()
             .filter(|s| !s.is_empty());
         if let Some(app) = app_override {
             println!(
-                "[PAG] AFG_APP_CRATE = {:?}; seeding its functions (app-crate override)",
+                "[PAG] CRUX_APP_CRATE = {:?}; seeding its functions (app-crate override)",
                 app
             );
             pag.app_crate = app.clone();
@@ -688,13 +688,13 @@ impl<'m> PointerAssignmentGraph<'m> {
         } else {
             // No `main` (a library crate analyzed on its own). Infer the app crate as the
             // non-runtime crate defining the most functions, and seed its entry points. Set
-            // AFG_APP_CRATE to override if the inference is wrong.
+            // CRUX_APP_CRATE to override if the inference is wrong.
             let inferred = pag.infer_app_crate();
             if inferred.is_empty() {
-                println!("[PAG] warning: no main and could not infer an app crate (set AFG_APP_CRATE); no constraints discovered");
+                println!("[PAG] warning: no main and could not infer an app crate (set CRUX_APP_CRATE); no constraints discovered");
                 return pag;
             }
-            println!("[PAG] no main found; inferred app crate = {:?} (set AFG_APP_CRATE to override)", inferred);
+            println!("[PAG] no main found; inferred app crate = {:?} (set CRUX_APP_CRATE to override)", inferred);
             pag.app_crate = inferred.clone();
             pag.seed_app_crate_entry_points(&inferred);
         }
@@ -724,7 +724,7 @@ impl<'m> PointerAssignmentGraph<'m> {
 
         pag.print_statistics();
 
-        // for AFG
+        // for CRUX
         if let Some(mut psa) = pag.psa.take() {
             psa.init(&pag);
             psa.run();
@@ -2661,8 +2661,8 @@ impl<'m> PointerAssignmentGraph<'m> {
                 self.app_crate.is_empty() || self.is_from_app_crate(callee_name)
             }
 
-            // TODO: we may not need this context creating for AFG
-            PAContextSelectPolicy::AFG => {
+            // TODO: we may not need this context creating for CRUX
+            PAContextSelectPolicy::CRUX => {
                 // // TODO: do we need so complex matching?
                 // let matched = if let Some((llm, ac)) = self.config.context_signatures.as_ref() {
                 //     crate::context_finder::match_callsite(
@@ -2679,7 +2679,7 @@ impl<'m> PointerAssignmentGraph<'m> {
                 // // for debugging, print the matched context if any
                 // if let Some(context_point) = matched.clone() {
                 //     println!(
-                //         "[AFG] hit context = {} with category = {:?} through strategy = {}",
+                //         "[CRUX] hit context = {} with category = {:?} through strategy = {}",
                 //         context_point.matched_fn_name,
                 //         context_point.category,
                 //         context_point.strategy
@@ -2720,9 +2720,9 @@ impl<'m> PointerAssignmentGraph<'m> {
             callee_name, callee_context
         );
 
-        if create && self.config.policy == PAContextSelectPolicy::AFG {
+        if create && self.config.policy == PAContextSelectPolicy::CRUX {
             println!(
-                "[AFG] select context: function {} -> context {:?}",
+                "[CRUX] select context: function {} -> context {:?}",
                 callee_name, callee_context
             )
         }
@@ -2901,8 +2901,8 @@ impl<'m> PointerAssignmentGraph<'m> {
         };
         // normal flow ends here
 
-        // for AFG, check if the callsite matches any context signature
-        let matched = (self.config.policy == PAContextSelectPolicy::AFG)
+        // for CRUX, check if the callsite matches any context signature
+        let matched = (self.config.policy == PAContextSelectPolicy::CRUX)
             .then(|| self.config.context_signatures.as_ref())
             .flatten()
             .and_then(|(llm, ac, data)| {
@@ -2919,7 +2919,7 @@ impl<'m> PointerAssignmentGraph<'m> {
         // for debugging, print the matched context if any
         if let Some(context_point) = matched {
             println!(
-                "[AFG] hit function = {} with category = {:?} through strategy = {}",
+                "[CRUX] hit function = {} with category = {:?} through strategy = {}",
                 context_point.matched_fn_name, context_point.category, context_point.strategy
             );
 
@@ -2973,7 +2973,7 @@ impl<'m> PointerAssignmentGraph<'m> {
                     // analysis, so the evolving catalog can add categories safely.
                     _ => {
                         eprintln!(
-                            "[AFG] warning: skipping unhandled context category = {:?} for callsite {:?}",
+                            "[CRUX] warning: skipping unhandled context category = {:?} for callsite {:?}",
                             category, callsite
                         );
                         None
@@ -3006,7 +3006,7 @@ impl<'m> PointerAssignmentGraph<'m> {
                         result_node: result_id,
                     };
 
-                    println!("[AFG] register semantic point = {}", semantic_point);
+                    println!("[CRUX] register semantic point = {}", semantic_point);
 
                     self.semantic_points.push(semantic_point);
                 }

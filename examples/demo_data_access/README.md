@@ -1,4 +1,4 @@
-# afg_data_demo
+# crux_data_demo
 
 A compact, single-file MadSim demo of a cross-user data leak whose shared state
 is a **database**, not a hand-marked cache. It is the data-store counterpart to
@@ -23,8 +23,8 @@ request context, which the instrumenter does not yet insert).
 ```sh
 # 1) compile the demo to LLVM IR with debug info
 cd rail-rs/examples/demo_data_access
-cargo +1.85.0 rustc --bin afg_data_demo -- --emit=llvm-ir -Cdebuginfo=2 -Ccodegen-units=1
-LL=$(ls -t target/debug/deps/afg_data_demo-*.ll | head -1)
+cargo +1.85.0 rustc --bin crux_data_demo -- --emit=llvm-ir -Cdebuginfo=2 -Ccodegen-units=1
+LL=$(ls -t target/debug/deps/crux_data_demo-*.ll | head -1)
 
 # 2) producer -> instrument -> observe(MadSim) -> analyze -> schedule -> replay
 #    (pass absolute catalog paths; the defaults are relative to afg_prototype)

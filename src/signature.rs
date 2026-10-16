@@ -28,7 +28,7 @@ pub struct Signature {
     pub fn_name: String,
     pub category: Option<String>,
 
-    /// for AFG use
+    /// for CRUX use
     pub prompt_arg_index: Option<usize>, // TODO: there might be multiple prompt args, but for now we only support one
     pub prompt_role: Option<String>,
     pub result_index: Option<usize>,
@@ -238,12 +238,12 @@ pub fn match_callsite(
     data: &[Signature],
 ) -> Option<SecurityPoint> {
     let demangled = format!("{:#}", demangle(&strip_symbol(callee_mangled)));
-    // Debug: dump every callee whose demangled name contains AFG_DUMP_CALLEES, so
+    // Debug: dump every callee whose demangled name contains CRUX_DUMP_CALLEES, so
     // the exact symbol of an elusive call (e.g. an async_trait DAO method) can be
     // read off and cataloged. Off unless the env var is set.
-    if let Ok(filt) = std::env::var("AFG_DUMP_CALLEES") {
+    if let Ok(filt) = std::env::var("CRUX_DUMP_CALLEES") {
         if !filt.is_empty() && demangled.contains(&filt) {
-            eprintln!("[AFG-CALLEE] {demangled}  (in {})", format!("{:#}", demangle(&strip_symbol(caller))));
+            eprintln!("[CRUX-CALLEE] {demangled}  (in {})", format!("{:#}", demangle(&strip_symbol(caller))));
         }
     }
     let candidates = candidate_paths(&demangled);

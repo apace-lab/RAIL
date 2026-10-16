@@ -357,7 +357,7 @@ mod tests {
     fn infers_the_app_check_from_guard_shape() {
         // In the complex async demo, `if !is_accessible(&c).await { return }` is a guard, so
         // `is_accessible` must be inferred as a check; `to_json` (not used in a branch) must not.
-        let path = fixture("AFG_COMPLEX_LL", "complex_dbg.ll");
+        let path = fixture("CRUX_COMPLEX_LL", "complex_dbg.ll");
         let m = llvm_ir::Module::from_ir_path(&path).expect("parse complex fixture");
         let data: BTreeSet<String> = ["complex::to_json".to_string()].into_iter().collect();
         let inferred = inferred_check_functions([&m], "complex", &data);

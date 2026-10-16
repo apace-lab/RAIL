@@ -1,5 +1,5 @@
 // Self-contained demo for the context finder: the two-user shared-cache leak,
-// plus stubbed LLM and access-control calls whose paths match the AFG catalogs
+// plus stubbed LLM and access-control calls whose paths match the CRUX catalogs
 // (signatures/llm_api_functions.json, signatures/ac_functions.json) by suffix /
 // last-two-segment short-name. Stubbed so it compiles with no external crates.
 // Compile with an LLVM-19 rustc (see README's "how to config"):

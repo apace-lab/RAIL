@@ -1,10 +1,10 @@
 //! ACE: Access-Control Enforcement (the automated enforcement pass).
 //!
-//! This is AFG's ACE stage. The control-flow dominance mechanism it consumes keeps its
+//! This is CRUX's ACE stage. The control-flow dominance mechanism it consumes keeps its
 //! graph name (`DominanceOracle`, `DominanceFacts`, backed by `dominator_tree`); only this
 //! enforcement-criterion layer is named ACE.
 //!
-//! AFG's correctness property is the *dominance invariant*: every access to a shared
+//! CRUX's correctness property is the *dominance invariant*: every access to a shared
 //! resource must be dominated, on all paths, by an access-control check bound to that
 //! resource. This module computes the negation automatically: a data-access site is a
 //! *candidate* (a potential cross-user leak) when there exists a path from an entry point
