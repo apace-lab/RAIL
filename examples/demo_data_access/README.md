@@ -7,18 +7,18 @@ decoded per request, two users through one handler), but the leak lives in one
 table keyed by prompt only, so one user's stored row is served to another.
 
 The point of this demo is the **data-access catalog**. The store access carries
-NO hand-written AFG macros. It goes through catalog-matching stubs:
+NO hand-written CRUX macros. It goes through catalog-matching stubs:
 
 - `sqlx::query::Query::execute` -> matched as **data-write**
 - `sqlx::query::Query::fetch_one` -> matched as **data-read**
 
-so AFG's producer finds them via `rail-rs/signatures/data_access_functions.json`
-and inserts `afg_access!` itself, with the real PANode. `argon2` is the real
+so CRUX's producer finds them via `rail-rs/signatures/data_access_functions.json`
+and inserts `crux_access!` itself, with the real PANode. `argon2` is the real
 crate; `jsonwebtoken` and `async_openai` are the same deterministic stand-ins used
-in `demo_dynamic`. The only AFG piece added by hand is `with_afg_context` (per
+in `demo_dynamic`. The only CRUX piece added by hand is `with_crux_context` (per
 request context, which the instrumenter does not yet insert).
 
-## Run the full AFG pipeline on it
+## Run the full CRUX pipeline on it
 
 ```sh
 # 1) compile the demo to LLVM IR with debug info
@@ -27,22 +27,22 @@ cargo +1.85.0 rustc --bin crux_data_demo -- --emit=llvm-ir -Cdebuginfo=2 -Ccodeg
 LL=$(ls -t target/debug/deps/crux_data_demo-*.ll | head -1)
 
 # 2) producer -> instrument -> observe(MadSim) -> analyze -> schedule -> replay
-#    (pass absolute catalog paths; the defaults are relative to afg_prototype)
+#    (pass absolute catalog paths; the defaults are relative to crux)
 SIGS=$(cd ../../signatures && pwd)
-cd ../../../afg_prototype
+cd ../../../crux
 LLVM_SYS_191_PREFIX=/opt/homebrew/opt/llvm@19 \
   ./target/debug/afg --llvm-ir "../rail-rs/examples/demo_data_access/$LL" \
   --project ../rail-rs/examples/demo_data_access \
   --llm-api "$SIGS/llm_api_functions.json" \
   --ac "$SIGS/ac_functions.json" \
   --data-access "$SIGS/data_access_functions.json" \
-  --run-dir /tmp/afg_data_run --cargo-cmd run --seeds 1 --replay
+  --run-dir /tmp/crux_data_run --cargo-cmd run --seeds 1 --replay
 ```
 
-To see what AFG inserted (none of it is in this source):
+To see what CRUX inserted (none of it is in this source):
 
 ```sh
-grep -n 'afg_r4_runtime::' /tmp/afg_data_run/instrumented/app/src/main.rs
+grep -n 'crux_runtime::' /tmp/crux_data_run/instrumented/app/src/main.rs
 ```
 
 ## What it demonstrates
@@ -61,8 +61,8 @@ and the run prints the actual leak: `[leak] bob was served a row owned by alice`
 Point the dashboard at the run to see it:
 
 ```sh
-cd ../afg_prototype/afg-dashboard
-cargo run -- --run-dir /tmp/afg_data_run   # then open http://127.0.0.1:8090
+cd ../crux/crux_dashboard
+cargo run -- --run-dir /tmp/crux_data_run   # then open http://127.0.0.1:8090
 ```
 
 ## Note on the replay verdict (resource-linked)
@@ -75,7 +75,7 @@ that and reported `not reproduced`.
 The producer now resolves a RESOURCE id for each data-access site (the shared
 store its arguments alias, via points-to; here the `POOL` handle), so `execute`
 and `fetch_one` get the SAME resource id even though their PANodes differ. The
-instrumenter emits it (`afg_access!(... resource = "res:942")`) and the scheduler
+instrumenter emits it (`crux_access!(... resource = "res:942")`) and the scheduler
 links the write and the read on that resource. So the replay now reports:
 
 ```

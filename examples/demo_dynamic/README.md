@@ -5,7 +5,7 @@ shape. Users sign in with a password (argon2) and receive a bearer token; every
 request is authenticated from that token and served against one shared,
 non-user-scoped cache. Two users (alice, bob) flow through the **same** handler
 and one token-decode call site, so the static model can't tell them apart. This
-exercises AFG's **dynamic per-user** path end to end.
+exercises CRUX's **dynamic per-user** path end to end.
 
 It is the single-file counterpart to `mini-chat-service` (same service, split
 across modules there). `argon2` is the real crate; `jsonwebtoken` and
@@ -13,7 +13,7 @@ across modules there). `argon2` is the real crate; `jsonwebtoken` and
 by name exactly as the real SDKs would be. argon2's `verify_password` is the
 credential check; `jsonwebtoken::decode` establishes the per-request principal.
 
-## Run the full AFG pipeline on it
+## Run the full CRUX pipeline on it
 
 ```sh
 # 1) compile the demo to LLVM IR with debug info
@@ -22,11 +22,11 @@ cargo +1.85.0 rustc --bin crux_dyn_demo -- --emit=llvm-ir -Cdebuginfo=2 -Ccodege
 LL=$(ls -t target/debug/deps/crux_dyn_demo-*.ll | head -1)
 
 # 2) producer -> instrument -> observe(MadSim) -> analyze -> schedule -> replay
-cd ../../../afg_prototype
+cd ../../../crux
 LLVM_SYS_191_PREFIX=/opt/homebrew/opt/llvm@19 \
   ./target/debug/afg --llvm-ir "../rail_rs/examples/demo_dynamic/$LL" \
   --project ../rail_rs/examples/demo_dynamic \
-  --run-dir /tmp/afg_dyn --cargo-cmd run --seeds 1 --replay
+  --run-dir /tmp/crux_dyn --cargo-cmd run --seeds 1 --replay
 ```
 
 Expected:
@@ -37,6 +37,6 @@ Expected:
 - `observe/scopes.json` -> `overlaps: [{left: alice, right: bob, shared_nodes: [..]}]`
 - `schedule/schedule-000.json` -> a two-user replay schedule on the shared node
 
-AFG auto-inserts `afg_auth!` (principal from the token-decode call's first
-argument) and `afg_monitor!`/`afg_access!` at the LLM call; the app itself is
+CRUX auto-inserts `crux_auth!` (principal from the token-decode call's first
+argument) and `crux_monitor!`/`crux_access!` at the LLM call; the app itself is
 uninstrumented.

@@ -141,13 +141,13 @@ name = "crux_data_demo"
 version = "0.1.0"
 dependencies = [
  "argon2",
- "crux_r4_runtime",
+ "crux_runtime",
  "madsim",
  "madsim-tokio",
 ]
 
 [[package]]
-name = "crux_r4_runtime"
+name = "crux_runtime"
 version = "0.1.0"
 dependencies = [
  "madsim",

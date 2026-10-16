@@ -137,7 +137,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
 
 [[package]]
-name = "crux_r4_runtime"
+name = "crux_runtime"
 version = "0.1.0"
 dependencies = [
  "madsim",
@@ -446,7 +446,7 @@ name = "mini_chat_service"
 version = "0.1.0"
 dependencies = [
  "argon2",
- "crux_r4_runtime",
+ "crux_runtime",
  "madsim",
  "madsim-tokio",
 ]

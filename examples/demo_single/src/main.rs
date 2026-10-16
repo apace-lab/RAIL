@@ -1,17 +1,17 @@
 // Single-user demo for the scheduler's synthesized second user.
 //
 // Only ONE real user (alice) is ever observed, so the static analysis sees a
-// single principal and `crux_cuie` SYNTHESIZES a second user
-// (`afg-synthetic`). This app makes that synthesis executable: at REPLAY time,
+// single principal and `crux_scheduler` SYNTHESIZES a second user
+// (`crux-synthetic`). This app makes that synthesis executable: at REPLAY time,
 // and only then (detected via `schedule_contains_principal`, since the schedule
 // is empty during observation), it injects the synthetic user, who re-issues
 // alice's prompt, hits the shared prompt-keyed cache, and reads alice's answer.
-// The replay trace then shows alice WRITE and afg-synthetic READ the shared node,
+// The replay trace then shows alice WRITE and crux-synthetic READ the shared node,
 // which `verify_replay` confirms as a reproduced cross-user leak.
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use crux_r4_runtime::{schedule_contains_principal, with_crux_context, CruxContext, SYNTHETIC_PRINCIPAL};
+use crux_runtime::{schedule_contains_principal, with_crux_context, CruxContext, SYNTHETIC_PRINCIPAL};
 
 // Bearer-token auth stand-in; CRUX matches jsonwebtoken::decode and (via the
 // producer) takes its first argument as the principal.
@@ -91,8 +91,8 @@ async fn handle(req: Request) -> String {
     };
 
     if let Some(entry) = cache().lock().unwrap().get(&req.prompt).cloned() {
-        crux_r4_runtime::crux_monitor!(function = CACHE_FN);
-        crux_r4_runtime::crux_access!(node = CACHE_NODE, kind = crux_r4_runtime::AccessKind::Read, function = CACHE_FN);
+        crux_runtime::crux_monitor!(function = CACHE_FN);
+        crux_runtime::crux_access!(node = CACHE_NODE, kind = crux_runtime::AccessKind::Read, function = CACHE_FN);
         if entry.owner != sub {
             println!("[leak] {sub} served a cached answer owned by {}", entry.owner);
         }
@@ -101,8 +101,8 @@ async fn handle(req: Request) -> String {
 
     let client = async_openai::Client::new();
     let answer = client.chat().create(&req.prompt);
-    crux_r4_runtime::crux_monitor!(function = CACHE_FN);
-    crux_r4_runtime::crux_access!(node = CACHE_NODE, kind = crux_r4_runtime::AccessKind::Write, function = CACHE_FN);
+    crux_runtime::crux_monitor!(function = CACHE_FN);
+    crux_runtime::crux_access!(node = CACHE_NODE, kind = crux_runtime::AccessKind::Write, function = CACHE_FN);
     cache().lock().unwrap().insert(
         req.prompt.clone(),
         CacheEntry {
@@ -141,6 +141,6 @@ async fn main() {
             }),
         )
         .await;
-        println!("afg-synthetic received: {leaked}");
+        println!("crux-synthetic received: {leaked}");
     }
 }

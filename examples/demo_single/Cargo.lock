@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "afg-runtime"
+name = "crux_runtime"
 version = "0.1.0"
 dependencies = [
  "madsim",
@@ -140,7 +140,7 @@ dependencies = [
 name = "demo_single"
 version = "0.1.0"
 dependencies = [
- "afg-runtime",
+ "crux_runtime",
  "madsim",
  "madsim-tokio",
 ]
