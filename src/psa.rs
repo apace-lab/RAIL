@@ -105,7 +105,7 @@ impl fmt::Display for SemanticPoint {
     }
 }
 
-pub struct TaintAnalysis<'m> {
+pub struct PrincipalSensitiveAnalysis<'m> {
     callsites: BTreeMap<usize, PACallSite<'m>>,
     pub functions_by_name: BTreeMap<String, &'m llvm_ir::Function>,
     pub semantic_points: Vec<SemanticPoint>,
@@ -135,7 +135,7 @@ pub struct TaintAnalysis<'m> {
     pub app_crate: String,
 }
 
-impl<'m> TaintAnalysis<'m> {
+impl<'m> PrincipalSensitiveAnalysis<'m> {
     // pub fn new(pag: &'m PointerAssignmentGraph<'m>) -> Self {
     //     let outgoing = Self::build_outgoing_edges(&pag.edges);
     //     let (callsites_by_block, _callee2callsites) = Self::build_calls(&pag.callsites);
@@ -203,7 +203,7 @@ impl<'m> TaintAnalysis<'m> {
         self.propagate_data_contexts(&mut worklist);
     }
 
-    ///////// preparing taint analysis from pag /////////////
+    ///////// preparing principal-sensitive analysis (PSA) from pag /////////////
 
     fn build_semantic_point_index(&mut self) {
         for (point_index, point) in self.semantic_points.iter().enumerate() {
@@ -374,7 +374,7 @@ impl<'m> TaintAnalysis<'m> {
         pos_mode: ReturnPropagationMode,
     ) -> Vec<PACallSite<'m>> {
         debug!(
-            "[AFG] get callsites for caller = {}, block = {}, callsite_id = {}",
+            "[CRUX] get callsites for caller = {}, block = {}, callsite_id = {}",
             caller, block, callsite_id
         );
 
@@ -387,13 +387,13 @@ impl<'m> TaintAnalysis<'m> {
         };
 
         debug!(
-            "[AFG] get_callsites_after_in_block: current callsites = {:?}",
+            "[CRUX] get_callsites_after_in_block: current callsites = {:?}",
             callsites
         );
         for cs in callsites {
             // also debug
             if let Some(cs) = self.callsites.get(cs) {
-                debug!("[AFG]     {:?}", cs);
+                debug!("[CRUX]     {:?}", cs);
             }
         }
 
@@ -410,7 +410,7 @@ impl<'m> TaintAnalysis<'m> {
             ReturnPropagationMode::AfterReturnedCall => pos + 1,
             ReturnPropagationMode::IncludeCurrentCall => pos,
         };
-        debug!("[AFG] find pos = {}, start_pos = {}", pos, start_pos);
+        debug!("[CRUX] find pos = {}, start_pos = {}", pos, start_pos);
 
         let ids = callsites.iter().skip(start_pos).copied().collect();
 
@@ -479,7 +479,7 @@ impl<'m> TaintAnalysis<'m> {
     /// return one true path successor bb of block in function following normal execution
     fn get_normal_success_block(&self, function: &str, block: &str) -> Option<String> {
         let bbs = self.get_normal_success_blocks(function, block);
-        debug!("[AFG] get_normal_success_block: find {} success blocks ({:?}) for function = {}, bb = {}", bbs.len(), bbs, function, block);
+        debug!("[CRUX] get_normal_success_block: find {} success blocks ({:?}) for function = {}, bb = {}", bbs.len(), bbs, function, block);
 
         if bbs.is_empty() {
             return None;
@@ -489,7 +489,7 @@ impl<'m> TaintAnalysis<'m> {
         if bbs.len() > 1 {
             // special, i've only seen 1 successor so far
             println!(
-                "[AFG] get_normal_success_block: only return the 1st successor block = {} but found {}: {:?}",
+                "[CRUX] get_normal_success_block: only return the 1st successor block = {} but found {}: {:?}",
                 successor, bbs.len(), bbs,
             );
         }
@@ -502,7 +502,7 @@ impl<'m> TaintAnalysis<'m> {
         return PAContext::Global;
     }
 
-    ///////////// logic of taint analysis /////////////////
+    ///////////// logic of principal-sensitive analysis (PSA) /////////////////
 
     fn seed_authenticated_functions(&mut self) {
         let mut seeds = Vec::new();
@@ -517,26 +517,26 @@ impl<'m> TaintAnalysis<'m> {
                 auth_callsite: point.callsite_id,
             };
 
-            println!("[AFG] pricipal = {:?}", principal);
+            println!("[CRUX] pricipal = {:?}", principal);
 
             let Some(success_block) = self.get_normal_success_block(&point.caller, &point.block)
             else {
                 debug!(
-                    "[AFG] seed_authenticated_functions: auth_callsite = {}: no success block",
+                    "[CRUX] seed_authenticated_functions: auth_callsite = {}: no success block",
                     point.callsite_id
                 );
                 continue;
             };
 
             debug!(
-                "[AFG] seed_authenticated_functions: auth_callsite = {} success continuation: {}::{}",
+                "[CRUX] seed_authenticated_functions: auth_callsite = {} success continuation: {}::{}",
                 point.callsite_id, point.caller, success_block
             );
 
             let reachable_blocks = self.normal_reachable_blocks(&point.caller, &success_block);
 
             debug!(
-                "[AFG] seed_authenticated_functions: auth_callsite = {} reachable authenticated blocks = {:?}",
+                "[CRUX] seed_authenticated_functions: auth_callsite = {} reachable authenticated blocks = {:?}",
                 point.callsite_id, reachable_blocks
             );
 
@@ -550,7 +550,7 @@ impl<'m> TaintAnalysis<'m> {
                     self.get_callsites_in_block(&point.caller, &block, &point.caller_context);
 
                 debug!(
-                    "[AFG] seed_authenticated_functions: find {} callsites in function = {}, block = {}, context = {:?}",
+                    "[CRUX] seed_authenticated_functions: find {} callsites in function = {}, block = {}, context = {:?}",
                     callsites.len(),
                     &point.caller,
                     &block,
@@ -574,7 +574,7 @@ impl<'m> TaintAnalysis<'m> {
             // ---------------------------------------------------------
 
             if reaches_return {
-                debug!("[AFG] seed_authenticated_functions: reach return block");
+                debug!("[CRUX] seed_authenticated_functions: reach return block");
                 self.propagate_return_to_callers(
                     &point.caller,
                     &point.caller_context,
@@ -614,7 +614,7 @@ impl<'m> TaintAnalysis<'m> {
         }
 
         debug!(
-            "[AFG] propagate_return_to_callers: propagate return from function={} ctx={:?} principal={:?}",
+            "[CRUX] propagate_return_to_callers: propagate return from function={} ctx={:?} principal={:?}",
             returned_function, returned_context, principal,
         );
 
@@ -623,7 +623,7 @@ impl<'m> TaintAnalysis<'m> {
         // No callers => reached root, e.g. main.
         if callsites.is_empty() {
             debug!(
-                "[AFG] propagate_return_to_callers: reached root function {}",
+                "[CRUX] propagate_return_to_callers: reached root function {}",
                 returned_function
             );
             return;
@@ -652,7 +652,7 @@ impl<'m> TaintAnalysis<'m> {
         };
 
         debug!(
-            "[AFG] process_return_into_caller: caller={} block={} after callsite={:?}",
+            "[CRUX] process_return_into_caller: caller={} block={} after callsite={:?}",
             caller, caller_block, callsite,
         );
 
@@ -664,7 +664,7 @@ impl<'m> TaintAnalysis<'m> {
             self.get_callsites_after_in_block(&caller, &caller_block, callsite.id, pos_mode);
 
         debug!(
-            "[AFG] process_return_into_caller: find {} later_callsites = {:?}",
+            "[CRUX] process_return_into_caller: find {} later_callsites = {:?}",
             later_callsites.len(),
             later_callsites
         );
@@ -679,7 +679,7 @@ impl<'m> TaintAnalysis<'m> {
 
         let mut reachable_blocks = HashSet::new();
         debug!(
-            "[AFG] process_return_into_caller: caller = {}, reachable blocks = {:?}",
+            "[CRUX] process_return_into_caller: caller = {}, reachable blocks = {:?}",
             caller, reachable_blocks,
         );
 
@@ -698,7 +698,7 @@ impl<'m> TaintAnalysis<'m> {
 
             let callsites = self.get_callsites_in_block(&caller, &block, &caller_context);
             debug!(
-                "[AFG] process_return_into_caller: find {} callsites = {:?}",
+                "[CRUX] process_return_into_caller: find {} callsites = {:?}",
                 callsites.len(),
                 callsites
             );
@@ -714,7 +714,7 @@ impl<'m> TaintAnalysis<'m> {
 
         if reachable_blocks.contains("Return") {
             debug!(
-                "[AFG] process_return_into_caller: authenticated continuation reaches return of {}",
+                "[CRUX] process_return_into_caller: authenticated continuation reaches return of {}",
                 caller
             );
 
@@ -750,7 +750,7 @@ impl<'m> TaintAnalysis<'m> {
         };
 
         debug!(
-            "[AFG] authenticated callsite {:?} seeds callee {}",
+            "[CRUX] authenticated callsite {:?} seeds callee {}",
             callsite, callee_info.0,
         );
 
@@ -774,7 +774,7 @@ impl<'m> TaintAnalysis<'m> {
         let callee_context = self.get_callee_context(&callsite);
 
         debug!(
-            "[AFG] authenticated continuation seeds {} at callsite {:?}",
+            "[CRUX] authenticated continuation seeds {} at callsite {:?}",
             callee, callsite,
         );
 
@@ -802,7 +802,7 @@ impl<'m> TaintAnalysis<'m> {
         }
 
         debug!(
-            "[AFG] propagate_function_principals (initial): #worklist = {}",
+            "[CRUX] propagate_function_principals (initial): #worklist = {}",
             worklist.len()
         );
 
@@ -810,7 +810,7 @@ impl<'m> TaintAnalysis<'m> {
             let callsites = self.get_callsites_of_function(&function, &context);
 
             debug!(
-                "[AFG] find {} callsites in function = {}, context = {:?}",
+                "[CRUX] find {} callsites in function = {}, context = {:?}",
                 callsites.len(),
                 &function,
                 &context,
@@ -838,7 +838,7 @@ impl<'m> TaintAnalysis<'m> {
 
                 if inserted {
                     debug!(
-                        "[AFG] propagate principal {:?}: {} -> {:?}",
+                        "[CRUX] propagate principal {:?}: {} -> {:?}",
                         principal, function, key.1
                     );
 
@@ -873,7 +873,7 @@ impl<'m> TaintAnalysis<'m> {
             }
 
             println!(
-                "[AFG] semantic point {} {} has principals {:?}",
+                "[CRUX] semantic point {} {} has principals {:?}",
                 point.callsite_id,
                 point.callee.as_deref().unwrap_or("<unknown>"),
                 principals,

@@ -4,7 +4,9 @@
 //! For a more thorough introduction to the crate and how to get started,
 //! see the [crate's README](https://github.com/cdisselkoen/llvm-ir-analysis/blob/main/README.md).
 
-pub mod taint_analysis;
+pub mod psa;
+pub mod debuginfo;
+pub mod ace;
 mod call_graph;
 mod context;
 mod control_dep_graph;
@@ -12,19 +14,20 @@ mod control_flow_graph;
 mod dominator_tree;
 mod functions_by_type;
 mod pointer_assignment_graph;
+pub mod guard_inference;
 pub mod signature;
 pub mod util;
 
-pub use crate::taint_analysis::TaintAnalysis;
+pub use crate::psa::PrincipalSensitiveAnalysis;
 pub use crate::call_graph::CallGraph;
 // Re-export the context types so consumers can read the `pub` context fields
-// exposed by the taint analysis (e.g. `node_contexts` values are `PAContextElem`s).
+// exposed by the principal-sensitive analysis (PSA; e.g. `node_contexts` values are `PAContextElem`s).
 pub use crate::context::{PAContext, PAContextElem};
 pub use crate::control_dep_graph::ControlDependenceGraph;
 pub use crate::control_flow_graph::{CFGNode, ControlFlowGraph};
 pub use crate::dominator_tree::{DominatorTree, PostDominatorTree};
 pub use crate::functions_by_type::FunctionsByType;
-pub use crate::pointer_assignment_graph::{PAEdge, PANode, PointerAssignmentGraph};
+pub use crate::pointer_assignment_graph::{detect_app_crate, PAEdge, PANode, PointerAssignmentGraph};
 use llvm_ir::{Function, Module};
 use log::debug;
 use std::cell::{Ref, RefCell};
@@ -53,8 +56,8 @@ pub struct ModuleAnalysis<'m> {
         Vec<signature::Signature>,
         Vec<signature::Signature>,
     )>,
-    /// optional taint analysis for the module, which can be used to detect potential leaks of sensitive information from LLM API calls to access-control sinks
-    taint_analysis: SimpleCache<TaintAnalysis<'m>>,
+    /// optional principal-sensitive analysis (PSA) for the module, which can be used to detect potential leaks of sensitive information from LLM API calls to access-control sinks
+    psa: SimpleCache<PrincipalSensitiveAnalysis<'m>>,
 }
 
 impl<'m> ModuleAnalysis<'m> {
@@ -74,7 +77,7 @@ impl<'m> ModuleAnalysis<'m> {
                 .map(|f| (f.name.as_str(), FunctionAnalysis::new(f)))
                 .collect(),
             context_catalogs: None,
-            taint_analysis: SimpleCache::new(),
+            psa: SimpleCache::new(),
         }
     }
 
@@ -124,13 +127,13 @@ impl<'m> ModuleAnalysis<'m> {
         })
     }
 
-    /// Get the taint analysis for the `Module`: builds the PAG in the given mode,
+    /// Get the principal-sensitive analysis (PSA) for the `Module`: builds the PAG in the given mode,
     /// runs principal/semantic-context propagation, and returns the engine.
     /// Requires the context catalogs to have been set (see `set_context_catalogs`).
-    pub fn taint_analysis(&self, mode: &str, k: Option<usize>) -> Ref<'_, TaintAnalysis<'m>> {
-        self.taint_analysis.get_or_insert_with(move || {
+    pub fn psa(&self, mode: &str, k: Option<usize>) -> Ref<'_, PrincipalSensitiveAnalysis<'m>> {
+        self.psa.get_or_insert_with(move || {
             let pag = self.pointer_assignment_graph(mode, k);
-            let mut engine = TaintAnalysis::new();
+            let mut engine = PrincipalSensitiveAnalysis::new();
             engine.init(&pag);
             engine.run();
             engine
@@ -176,8 +179,13 @@ pub struct CrossModuleAnalysis<'m> {
         Vec<signature::Signature>,
         Vec<signature::Signature>,
     )>,
-    /// optional taint analysis for the module, which can be used to detect potential leaks of sensitive information from LLM API calls to access-control sinks
-    taint_analysis: SimpleCache<TaintAnalysis<'m>>,
+    /// optional principal-sensitive analysis (PSA) for the module, which can be used to detect potential leaks of sensitive information from LLM API calls to access-control sinks
+    psa: SimpleCache<PrincipalSensitiveAnalysis<'m>>,
+    /// optional debug-info type recovery, scanned from the textual IR (see
+    /// `rail_rs::debuginfo`). Populated by `set_debug_types`; consumed by the dominance
+    /// pass to keep resources of different concrete types from binding when opaque-pointer
+    /// points-to over-merges them.
+    debug_types: Option<crate::debuginfo::DebugTypes>,
 }
 
 impl<'m> CrossModuleAnalysis<'m> {
@@ -199,8 +207,21 @@ impl<'m> CrossModuleAnalysis<'m> {
             functions_by_type: SimpleCache::new(),
             module_analyses,
             context_catalogs: None,
-            taint_analysis: SimpleCache::new(),
+            psa: SimpleCache::new(),
+            debug_types: None,
         }
+    }
+
+    /// Provide debug-info types recovered from the textual IR (see
+    /// [`crate::debuginfo::DebugTypes`]). Optional; when absent the dominance pass runs on
+    /// points-to alone.
+    pub fn set_debug_types(&mut self, dt: crate::debuginfo::DebugTypes) {
+        self.debug_types = Some(dt);
+    }
+
+    /// The recovered debug-info types, if [`set_debug_types`] was called.
+    pub fn debug_types(&self) -> Option<&crate::debuginfo::DebugTypes> {
+        self.debug_types.as_ref()
     }
 
     /// Provide the (llm, access-control, data-store) catalogs so the pointer
@@ -257,13 +278,13 @@ impl<'m> CrossModuleAnalysis<'m> {
         })
     }
 
-    /// Get the taint analysis for the `Module`(s): builds the PAG in the given mode,
+    /// Get the principal-sensitive analysis (PSA) for the `Module`(s): builds the PAG in the given mode,
     /// runs principal/semantic-context propagation, and returns the engine.
     /// Requires the context catalogs to have been set (see `set_context_catalogs`).
-    pub fn taint_analysis(&self, mode: &str, k: Option<usize>) -> Ref<'_, TaintAnalysis<'m>> {
-        self.taint_analysis.get_or_insert_with(move || {
+    pub fn psa(&self, mode: &str, k: Option<usize>) -> Ref<'_, PrincipalSensitiveAnalysis<'m>> {
+        self.psa.get_or_insert_with(move || {
             let pag = self.pointer_assignment_graph(mode, k);
-            let mut engine = TaintAnalysis::new();
+            let mut engine = PrincipalSensitiveAnalysis::new();
             engine.init(&pag);
             engine.run();
             engine
@@ -315,8 +336,12 @@ pub struct FunctionAnalysis<'m> {
     function: &'m Function,
     /// Control flow graph for the function
     control_flow_graph: SimpleCache<ControlFlowGraph<'m>>,
+    /// Control flow graph with coroutine (async) resume-dispatch normalization
+    control_flow_graph_coroutine: SimpleCache<ControlFlowGraph<'m>>,
     /// Dominator tree for the function
     dominator_tree: SimpleCache<DominatorTree<'m>>,
+    /// Dominator tree over the coroutine-normalized CFG
+    dominator_tree_coroutine: SimpleCache<DominatorTree<'m>>,
     /// Postdominator tree for the function
     postdominator_tree: SimpleCache<PostDominatorTree<'m>>,
     /// Control dependence graph for the function
@@ -332,7 +357,9 @@ impl<'m> FunctionAnalysis<'m> {
         Self {
             function,
             control_flow_graph: SimpleCache::new(),
+            control_flow_graph_coroutine: SimpleCache::new(),
             dominator_tree: SimpleCache::new(),
+            dominator_tree_coroutine: SimpleCache::new(),
             postdominator_tree: SimpleCache::new(),
             control_dep_graph: SimpleCache::new(),
         }
@@ -346,11 +373,31 @@ impl<'m> FunctionAnalysis<'m> {
         })
     }
 
+    /// Get the coroutine-normalized `ControlFlowGraph` (async resume-dispatch rewired so
+    /// dominance reflects source order across `await`s). Identical to
+    /// [`control_flow_graph`](Self::control_flow_graph) for non-coroutine functions.
+    pub fn control_flow_graph_coroutine(&self) -> Ref<ControlFlowGraph<'m>> {
+        self.control_flow_graph_coroutine.get_or_insert_with(|| {
+            debug!("computing coroutine-normalized CFG for {}", &self.function.name);
+            ControlFlowGraph::new_coroutine_aware(self.function)
+        })
+    }
+
     /// Get the `DominatorTree` for the function.
     pub fn dominator_tree(&self) -> Ref<DominatorTree<'m>> {
         self.dominator_tree.get_or_insert_with(|| {
             let cfg = self.control_flow_graph();
             debug!("computing dominator tree for {}", &self.function.name);
+            DominatorTree::new(&cfg)
+        })
+    }
+
+    /// Get the `DominatorTree` over the coroutine-normalized CFG. Use this for
+    /// dominance queries that must hold across `await` points in `async fn`s.
+    pub fn dominator_tree_coroutine(&self) -> Ref<DominatorTree<'m>> {
+        self.dominator_tree_coroutine.get_or_insert_with(|| {
+            let cfg = self.control_flow_graph_coroutine();
+            debug!("computing coroutine dominator tree for {}", &self.function.name);
             DominatorTree::new(&cfg)
         })
     }

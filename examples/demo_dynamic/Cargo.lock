@@ -3,26 +3,6 @@
 version = 4
 
 [[package]]
-name = "afg-runtime"
-version = "0.1.0"
-dependencies = [
- "madsim",
- "madsim-tokio",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "afg_dyn_demo"
-version = "0.1.0"
-dependencies = [
- "afg-runtime",
- "argon2",
- "madsim",
- "madsim-tokio",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -155,6 +135,27 @@ name = "crossbeam-utils"
 version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
+
+[[package]]
+name = "crux_dyn_demo"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "crux_r4_runtime",
+ "madsim",
+ "madsim-tokio",
+]
+
+[[package]]
+name = "crux_r4_runtime"
+version = "0.1.0"
+dependencies = [
+ "madsim",
+ "madsim-tokio",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "crypto-common"

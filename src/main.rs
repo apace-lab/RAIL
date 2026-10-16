@@ -98,7 +98,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 pag.print_pointer_assignment_graph()?;
             }
 
-            "afg" => {
+            "crux" => {
                 // load context catalogs if both are given, so the analysis records context points
                 let llm_api_path_cli = util::get_flag_value(&args, "--api=");
                 let ac_path_cli = util::get_flag_value(&args, "--ac=");
@@ -145,9 +145,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                         analysis.pointer_assignment_graph(mode, None);
                     pag.print_pointer_assignment_graph()?;
 
-                    // // run the taint analysis on the PAG
-                    // let afg = analysis.taint_analysis(mode, None);
-                    // afg.print_leak_result(false, false);
+                    // // run the principal-sensitive analysis (PSA) on the PAG
+                    // let crux = analysis.psa(mode, None);
+                    // crux.print_leak_result(false, false);
                 } else {
                     eprintln!("Usage: cargo run -- input.ll --api=api.json --ac=ac.json");
                     return Ok(());

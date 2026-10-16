@@ -3,12 +3,12 @@
 // a bearer token; every request is authenticated from that token and served
 // against one shared, non-user-scoped cache. Two users flow through the SAME
 // handler and one token-decode call site, so the static model can't tell them
-// apart. This exercises AFG's dynamic per-user path end to end. (See
+// apart. This exercises CRUX's dynamic per-user path end to end. (See
 // `mini-chat-service` for the same service split across modules.)
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use afg_runtime::{with_afg_context, AfgContext};
+use crux_runtime::{with_crux_context, CruxContext};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
@@ -57,7 +57,7 @@ fn verify_password(password: &str, password_hash: &str) -> bool {
 }
 
 // Bearer-token authentication. `jsonwebtoken` is a deterministic stand-in for the
-// real crate so the demo runs under MadSim; AFG matches jsonwebtoken::decode
+// real crate so the demo runs under MadSim; CRUX matches jsonwebtoken::decode
 // (authentication) and takes its first argument, the token, as the principal.
 mod jsonwebtoken {
     pub struct DecodingKey;
@@ -196,8 +196,8 @@ async fn handle(req: Request) -> String {
     let _ = session.role;
 
     if let Some(entry) = cache().lock().unwrap().get(&req.prompt).cloned() {
-        afg_runtime::afg_monitor!(function = CACHE_FN);
-        afg_runtime::afg_access!(node = CACHE_NODE, kind = afg_runtime::AccessKind::Read, function = CACHE_FN);
+        crux_runtime::crux_monitor!(function = CACHE_FN);
+        crux_runtime::crux_access!(node = CACHE_NODE, kind = crux_runtime::AccessKind::Read, function = CACHE_FN);
         if entry.owner_user_id != session.user_id {
             println!(
                 "[leak] {} served a cached answer owned by {}",
@@ -210,8 +210,8 @@ async fn handle(req: Request) -> String {
     let client = async_openai::Client::new();
     let answer = client.chat().create(&req.prompt);
 
-    afg_runtime::afg_monitor!(function = CACHE_FN);
-    afg_runtime::afg_access!(node = CACHE_NODE, kind = afg_runtime::AccessKind::Write, function = CACHE_FN);
+    crux_runtime::crux_monitor!(function = CACHE_FN);
+    crux_runtime::crux_access!(node = CACHE_NODE, kind = crux_runtime::AccessKind::Write, function = CACHE_FN);
     cache().lock().unwrap().insert(
         req.prompt.clone(),
         CacheEntry {
@@ -230,15 +230,15 @@ async fn main() {
     let bob_token = login("bob", "bob-password").expect("bob sign-in");
 
     // 2) Two users issue requests through the same handler.
-    let a = tokio::spawn(with_afg_context(
-        AfgContext::default(),
+    let a = tokio::spawn(with_crux_context(
+        CruxContext::default(),
         handle(Request {
             token: alice_token,
             prompt: "summarize alice's notes".to_string(),
         }),
     ));
-    let b = tokio::spawn(with_afg_context(
-        AfgContext::default(),
+    let b = tokio::spawn(with_crux_context(
+        CruxContext::default(),
         handle(Request {
             token: bob_token.clone(),
             prompt: "summarize bob's notes".to_string(),
@@ -248,8 +248,8 @@ async fn main() {
 
     // 3) bob re-issues alice's earlier request and is served alice's cached
     //    answer. This is the cross-user leak.
-    let leaked = with_afg_context(
-        AfgContext::default(),
+    let leaked = with_crux_context(
+        CruxContext::default(),
         handle(Request {
             token: bob_token,
             prompt: "summarize alice's notes".to_string(),

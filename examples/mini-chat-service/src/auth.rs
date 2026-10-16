@@ -44,7 +44,7 @@ pub fn verify_password(password: &str, password_hash: &str) -> bool {
 }
 
 // Bearer-token authentication. `jsonwebtoken` is a deterministic stand-in for the
-// real crate so the example runs under MadSim; AFG matches jsonwebtoken::decode
+// real crate so the example runs under MadSim; CRUX matches jsonwebtoken::decode
 // (authentication) and takes its first argument, the token, as the request
 // principal. (argon2's verify_password is the credential check; the principal is
 // established here, per request.)

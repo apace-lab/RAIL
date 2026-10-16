@@ -190,7 +190,7 @@ working example and field reference.
 | `llm-api-ac` | backend-only variant: Argon2 password auth, JWT bearer tokens, role-based authorization |
 | `llm_ac_demo` | fixture matching the default LLM-API / access-control signature catalogs, for exercising `--pag=afg` |
 | `mini-chat-service` | real-app-shaped multi-user LLM service (argon2 auth, bearer tokens, shared cache) used to validate the full AFG pipeline end to end |
-| `demo_dynamic` (`afg_dyn_demo`) | single-file MadSim counterpart to `mini-chat-service`, for exercising AFG's dynamic per-user replay stage |
+| `demo_dynamic` (`crux_dyn_demo`) | single-file MadSim counterpart to `mini-chat-service`, for exercising AFG's dynamic per-user replay stage |
 
 ## Known issues
 

@@ -3,12 +3,12 @@ use crate::context::{
     PAConfig, PAContext, PAContextElem, PAContextMode, PAContextSelectPolicy, PAObjectContextKind,
 };
 use crate::signature::Signature;
-use crate::taint_analysis::SemanticPoint;
-use crate::taint_analysis::SemanticPointKind;
+use crate::psa::SemanticPoint;
+use crate::psa::SemanticPointKind;
 use crate::util;
 use crate::ControlFlowGraph;
 use crate::FunctionsByType;
-use crate::TaintAnalysis;
+use crate::PrincipalSensitiveAnalysis;
 use core::panic;
 use llvm_ir::function::Parameter;
 use llvm_ir::function::ParameterAttribute;
@@ -210,6 +210,17 @@ impl<'m> PANode<'m> {
             PANodeKind::FunctionReturn { function, .. } => Some(function),
             PANodeKind::FunctionObject { function, .. } => Some(function),
             PANodeKind::ReceiverObject { caller, .. } => Some(caller),
+            _ => None,
+        }
+    }
+
+    /// For an SSA-value node, its `(enclosing function, value name)`, where the value name
+    /// is rendered the way it appears in the IR (e.g. `%data_res`). Returns `None` for
+    /// non-SSA nodes or SSA nodes with no known function. Used to look the value up in the
+    /// debug-info type recovery (`rail_rs::debuginfo`).
+    pub fn ssa_ref(&self) -> Option<(&str, String)> {
+        match &self.kind {
+            PANodeKind::SSAValue { function: Some(f), name, .. } => Some((f.as_str(), name.to_string())),
             _ => None,
         }
     }
@@ -528,9 +539,9 @@ pub struct PointerAssignmentGraph<'m> {
     /// the (function, context) instantiation blow-up. empty => gate disabled.
     pub app_crate: String,
 
-    /// for AFG, the engine to record functions
+    /// for CRUX, the engine to record functions
     pub semantic_points: Vec<SemanticPoint>,
-    pub taint_analysis: Option<TaintAnalysis<'m>>,
+    pub psa: Option<PrincipalSensitiveAnalysis<'m>>,
 }
 
 impl<'m> PointerAssignmentGraph<'m> {
@@ -590,12 +601,12 @@ impl<'m> PointerAssignmentGraph<'m> {
             "kcfa" => PAConfig::k_callsite(k.unwrap()),
             "kobj" => PAConfig::k_object(k.unwrap()),
             "kmix" => PAConfig::k_mixed(k.unwrap()),
-            "afg" => PAConfig::afg(context_signatures),
+            "crux" => PAConfig::crux(context_signatures),
             _ => panic!("no such config."),
         };
 
-        let mut taint_analysis = if config.policy == PAContextSelectPolicy::AFG {
-            Some(TaintAnalysis::new())
+        let mut psa = if config.policy == PAContextSelectPolicy::CRUX {
+            Some(PrincipalSensitiveAnalysis::new())
         } else {
             None
         };
@@ -627,19 +638,19 @@ impl<'m> PointerAssignmentGraph<'m> {
             config: config,
             app_crate: String::new(),
             semantic_points: Vec::new(),
-            taint_analysis,
+            psa,
         };
 
         // An explicit app-crate override wins over main detection: it lets us
         // analyze a library crate (a framework-dispatched web app with no reachable
         // main), and avoids the loose main heuristic false-matching a monomorphized
         // symbol (e.g. one containing "domain17h").
-        let app_override = std::env::var("AFG_APP_CRATE")
+        let app_override = std::env::var("CRUX_APP_CRATE")
             .ok()
             .filter(|s| !s.is_empty());
         if let Some(app) = app_override {
             println!(
-                "[PAG] AFG_APP_CRATE = {:?}; seeding its functions (app-crate override)",
+                "[PAG] CRUX_APP_CRATE = {:?}; seeding its functions (app-crate override)",
                 app
             );
             pag.app_crate = app.clone();
@@ -652,7 +663,7 @@ impl<'m> PointerAssignmentGraph<'m> {
             println!("[PAG] potential main function: {}", main_name);
 
             // Derive the application crate for all policies (used by selective
-            // context, entry-point seeding, and the taint analysis's execution
+            // context, entry-point seeding, and the principal-sensitive analysis (PSA)'s execution
             // propagation), not only under AppOnly.
             pag.app_crate = parse_app_crate(&main_name);
 
@@ -675,8 +686,17 @@ impl<'m> PointerAssignmentGraph<'m> {
             let seed_crate = parse_app_crate(&main_name);
             pag.seed_app_crate_entry_points(&seed_crate);
         } else {
-            println!("[PAG] warning: cannot find main function (set AFG_APP_CRATE to analyze a library crate); no constraints discovered");
-            return pag;
+            // No `main` (a library crate analyzed on its own). Infer the app crate as the
+            // non-runtime crate defining the most functions, and seed its entry points. Set
+            // CRUX_APP_CRATE to override if the inference is wrong.
+            let inferred = pag.infer_app_crate();
+            if inferred.is_empty() {
+                println!("[PAG] warning: no main and could not infer an app crate (set CRUX_APP_CRATE); no constraints discovered");
+                return pag;
+            }
+            println!("[PAG] no main found; inferred app crate = {:?} (set CRUX_APP_CRATE to override)", inferred);
+            pag.app_crate = inferred.clone();
+            pag.seed_app_crate_entry_points(&inferred);
         }
 
         println!(
@@ -704,11 +724,11 @@ impl<'m> PointerAssignmentGraph<'m> {
 
         pag.print_statistics();
 
-        // for AFG
-        if let Some(mut taint_analysis) = pag.taint_analysis.take() {
-            taint_analysis.init(&pag);
-            taint_analysis.run();
-            taint_analysis.print_result();
+        // for CRUX
+        if let Some(mut psa) = pag.psa.take() {
+            psa.init(&pag);
+            psa.run();
+            psa.print_result();
         }
 
         pag
@@ -718,14 +738,45 @@ impl<'m> PointerAssignmentGraph<'m> {
     /// heuristics here: my compiled ir all have the following string in main:
     /// _ZN4main4main17h
     fn find_main_function_name(&self) -> Option<String> {
-        // Rust-mangled main usually contains "main4main" or ends around "4main".
+        // Rust-mangled `<crate>::main` is `_ZN<len><crate>4main17h..E`: the segment is
+        // exactly "main" (length 4), so match "4main17h" rather than a loose "main17h"
+        // (which false-matches monomorphized library symbols like `..foo_main17h..`).
         for name in self.functions_by_name.keys() {
-            if name.contains("main4main") || name.contains("main17h") {
+            if name.contains("4main17h") {
                 return Some(name.to_string());
             }
         }
-
         None
+    }
+
+    /// Infer the application crate when there is no `main` (a library crate compiled on its
+    /// own, e.g. a framework-dispatched web app or a single data-access crate): the
+    /// non-runtime crate that defines the most functions in the module(s).
+    fn infer_app_crate(&self) -> String {
+        // Count each non-runtime crate's own concrete definitions. A dependency's code appears
+        // here only as generic instantiations (monomorphizations carry a `$LT$...$GT$` type
+        // argument), whereas the crate under analysis contributes its own non-generic
+        // functions. Counting non-generic definitions therefore favors the application crate
+        // over an ORM/runtime dependency that happens to be monomorphized many times.
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+        for (name, func) in &self.functions_by_name {
+            if func.basic_blocks.is_empty() {
+                continue; // a declaration, not a definition
+            }
+            if name.contains("$LT$") {
+                continue; // a generic instantiation (e.g. a dependency monomorphized here)
+            }
+            let c = parse_app_crate(name);
+            if c.is_empty() || is_runtime_crate(&c) {
+                continue;
+            }
+            *counts.entry(c).or_default() += 1;
+        }
+        counts
+            .into_iter()
+            .max_by_key(|(_, n)| *n)
+            .map(|(c, _)| c)
+            .unwrap_or_default()
     }
 
     /// Seed every app-crate, non-skipped function as a Global root so that
@@ -2610,8 +2661,8 @@ impl<'m> PointerAssignmentGraph<'m> {
                 self.app_crate.is_empty() || self.is_from_app_crate(callee_name)
             }
 
-            // TODO: we may not need this context creating for AFG
-            PAContextSelectPolicy::AFG => {
+            // TODO: we may not need this context creating for CRUX
+            PAContextSelectPolicy::CRUX => {
                 // // TODO: do we need so complex matching?
                 // let matched = if let Some((llm, ac)) = self.config.context_signatures.as_ref() {
                 //     crate::context_finder::match_callsite(
@@ -2628,7 +2679,7 @@ impl<'m> PointerAssignmentGraph<'m> {
                 // // for debugging, print the matched context if any
                 // if let Some(context_point) = matched.clone() {
                 //     println!(
-                //         "[AFG] hit context = {} with category = {:?} through strategy = {}",
+                //         "[CRUX] hit context = {} with category = {:?} through strategy = {}",
                 //         context_point.matched_fn_name,
                 //         context_point.category,
                 //         context_point.strategy
@@ -2669,9 +2720,9 @@ impl<'m> PointerAssignmentGraph<'m> {
             callee_name, callee_context
         );
 
-        if create && self.config.policy == PAContextSelectPolicy::AFG {
+        if create && self.config.policy == PAContextSelectPolicy::CRUX {
             println!(
-                "[AFG] select context: function {} -> context {:?}",
+                "[CRUX] select context: function {} -> context {:?}",
                 callee_name, callee_context
             )
         }
@@ -2850,8 +2901,8 @@ impl<'m> PointerAssignmentGraph<'m> {
         };
         // normal flow ends here
 
-        // for AFG, check if the callsite matches any context signature
-        let matched = (self.config.policy == PAContextSelectPolicy::AFG)
+        // for CRUX, check if the callsite matches any context signature
+        let matched = (self.config.policy == PAContextSelectPolicy::CRUX)
             .then(|| self.config.context_signatures.as_ref())
             .flatten()
             .and_then(|(llm, ac, data)| {
@@ -2868,7 +2919,7 @@ impl<'m> PointerAssignmentGraph<'m> {
         // for debugging, print the matched context if any
         if let Some(context_point) = matched {
             println!(
-                "[AFG] hit function = {} with category = {:?} through strategy = {}",
+                "[CRUX] hit function = {} with category = {:?} through strategy = {}",
                 context_point.matched_fn_name, context_point.category, context_point.strategy
             );
 
@@ -2922,7 +2973,7 @@ impl<'m> PointerAssignmentGraph<'m> {
                     // analysis, so the evolving catalog can add categories safely.
                     _ => {
                         eprintln!(
-                            "[AFG] warning: skipping unhandled context category = {:?} for callsite {:?}",
+                            "[CRUX] warning: skipping unhandled context category = {:?} for callsite {:?}",
                             category, callsite
                         );
                         None
@@ -2955,7 +3006,7 @@ impl<'m> PointerAssignmentGraph<'m> {
                         result_node: result_id,
                     };
 
-                    println!("[AFG] register semantic point = {}", semantic_point);
+                    println!("[CRUX] register semantic point = {}", semantic_point);
 
                     self.semantic_points.push(semantic_point);
                 }
@@ -4736,6 +4787,70 @@ fn named_struct_name(receiver_ty: &TypeRef) -> Option<String> {
 /// parse the crate name from a Rust legacy-mangled symbol: `_ZN<len><crate>...`.
 /// e.g. `_ZN11llm_ac_demo4main17h..E` -> `llm_ac_demo`. returns "" if it does not
 /// look like a `_ZN`-mangled symbol (selective-context gate then disables).
+/// Crates that are language runtime / ubiquitous infrastructure, never the application under
+/// analysis. Used by app-crate inference to skip them when counting defined functions.
+fn is_runtime_crate(c: &str) -> bool {
+    matches!(
+        c,
+        "core"
+            | "std"
+            | "alloc"
+            | "compiler_builtins"
+            | "proc_macro"
+            | "test"
+            | "backtrace"
+            | "gimli"
+            | "addr2line"
+            | "object"
+            | "miniz_oxide"
+            | "adler"
+            | "adler2"
+            | "panic_unwind"
+            | "panic_abort"
+            | "unwind"
+            | "libc"
+            | "rustc_demangle"
+            | "rustc_std_workspace_core"
+            | "hashbrown"
+    )
+}
+
+/// Detect the application crate from a set of modules, before building the PAG: the crate of
+/// `<crate>::main` if present, else the non-runtime crate that defines the most non-generic
+/// functions. Mirrors the PAG's own detection; exposed so the producer can scope guard
+/// inference to the application crate.
+pub fn detect_app_crate<'a>(modules: impl IntoIterator<Item = &'a Module>) -> String {
+    let modules: Vec<&Module> = modules.into_iter().collect();
+    for m in &modules {
+        for f in &m.functions {
+            if f.name.contains("4main17h") {
+                let c = parse_app_crate(&f.name);
+                if !c.is_empty() {
+                    return c;
+                }
+            }
+        }
+    }
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for m in &modules {
+        for f in &m.functions {
+            if f.basic_blocks.is_empty() || f.name.contains("$LT$") {
+                continue;
+            }
+            let c = parse_app_crate(&f.name);
+            if c.is_empty() || is_runtime_crate(&c) {
+                continue;
+            }
+            *counts.entry(c).or_default() += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .max_by_key(|(_, n)| *n)
+        .map(|(c, _)| c)
+        .unwrap_or_default()
+}
+
 fn parse_app_crate(mangled: &str) -> String {
     let s = util::normalize_function_name(mangled).trim_start_matches('_');
     let Some(rest) = s.strip_prefix("ZN") else {

@@ -1,4 +1,4 @@
-# afg_dyn_demo
+# crux_dyn_demo
 
 A compact, single-file MadSim demo of a cross-user data leak in the real-app
 shape. Users sign in with a password (argon2) and receive a bearer token; every
@@ -18,8 +18,8 @@ credential check; `jsonwebtoken::decode` establishes the per-request principal.
 ```sh
 # 1) compile the demo to LLVM IR with debug info
 cd ../rail_rs/examples/demo_dynamic
-cargo +1.85.0 rustc --bin afg_dyn_demo -- --emit=llvm-ir -Cdebuginfo=2 -Ccodegen-units=1
-LL=$(ls -t target/debug/deps/afg_dyn_demo-*.ll | head -1)
+cargo +1.85.0 rustc --bin crux_dyn_demo -- --emit=llvm-ir -Cdebuginfo=2 -Ccodegen-units=1
+LL=$(ls -t target/debug/deps/crux_dyn_demo-*.ll | head -1)
 
 # 2) producer -> instrument -> observe(MadSim) -> analyze -> schedule -> replay
 cd ../../../afg_prototype

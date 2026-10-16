@@ -3,7 +3,7 @@ mod llm;
 mod server;
 mod store;
 
-use afg_runtime::{with_afg_context, AfgContext};
+use crux_runtime::{with_crux_context, CruxContext};
 use server::Request;
 
 // A small multi-user LLM service. Users sign in with a password (argon2) and
@@ -33,8 +33,8 @@ async fn main() {
 
     let mut handles = Vec::new();
     for req in inbox {
-        handles.push(tokio::spawn(with_afg_context(
-            AfgContext::default(),
+        handles.push(tokio::spawn(with_crux_context(
+            CruxContext::default(),
             server::handle(req),
         )));
     }
@@ -44,8 +44,8 @@ async fn main() {
 
     // 3) bob re-issues alice's earlier request. The shared cache key omits the
     //    user, so bob is served alice's cached answer. This is the cross-user leak.
-    let leaked = with_afg_context(
-        AfgContext::default(),
+    let leaked = with_crux_context(
+        CruxContext::default(),
         server::handle(Request {
             token: bob_token,
             model: "llama3".to_string(),

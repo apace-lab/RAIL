@@ -109,7 +109,7 @@ pub fn resolve_signature_file(
         }
 
         eprintln!(
-            "[AFG] error: provided {} does not exist: {}",
+            "[CRUX] error: provided {} does not exist: {}",
             description,
             path.display()
         );
@@ -124,13 +124,13 @@ pub fn resolve_signature_file(
         .join(default_filename);
 
     if default_path.is_file() {
-        println!("[AFG] found {}: {}", description, default_path.display());
+        println!("[CRUX] found {}: {}", description, default_path.display());
 
         return Some(default_path.to_string_lossy().into_owned());
     }
 
     eprintln!(
-        "[AFG] error: cannot find {} at {}",
+        "[CRUX] error: cannot find {} at {}",
         description,
         default_path.display()
     );

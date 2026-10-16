@@ -397,5 +397,113 @@
             "verified_via": "ambient",
             "taint_role": "catch-all for a data backend reached over raw HTTP (Firestore/Supabase REST, a REST API). NOTE: the LLM and AC catalogs also claim reqwest::send and are matched first (LLM, then AC, then data), so this entry is shadowed today; it becomes useful once URL/host-hint narrowing disambiguates the three, mirroring ac_hints.rs"
         }
+    ],
+
+    "lemmy": [
+        {
+            "fn_name": "lemmy_db_schema::source::private_message::PrivateMessage::read",
+            "category": "data-read",
+            "resource_arg": 1,
+            "resource_prefix": "pm",
+            "verified_via": "lemmy-0.19.0-source",
+            "taint_role": "Reads a private message by id (operand 1, after the pool). On the report path this read is not dominated by a participant check, so a non-participant reading it is the GHSA-r64r cross-user leak. Matched by short-name PrivateMessage::read."
+        },
+        {
+            "fn_name": "lemmy_db_schema::source::private_message::PrivateMessage::create",
+            "category": "data-write",
+            "resource_from_return": true,
+            "resource_expr": "{}.id",
+            "resource_prefix": "pm",
+            "verified_via": "lemmy-0.19.0-source",
+            "taint_role": "Creates a private message; the row id is generated and returned, so the resource instance id is read from the return value (`{}.id`). Establishes the sender as the owner of pm:<id>. Matched by short-name PrivateMessage::create."
+        }
+    ],
+
+    "filesystem": [
+        {
+            "fn_name": "std::fs::File::open",
+            "category": "data-read",
+            "resource_arg": 0,
+            "resource_prefix": "file",
+            "return_type": "Result<File, Error>",
+            "parameter_type": ["P"],
+            "verified_via": "dufs-ir",
+            "taint_role": "A file server's data store IS the filesystem: opening a file to serve its bytes is the leak-exposing read, and the file path (arg 0) is the resource. Short-name File::open also covers tokio::fs::file::File::open (dufs uses the tokio form). The cross-user leak is user B opening a path whose file user A created."
+        },
+        {
+            "fn_name": "std::fs::read_to_string",
+            "category": "data-read",
+            "resource_arg": 0,
+            "resource_prefix": "file",
+            "return_type": "Result<String, Error>",
+            "parameter_type": ["P"],
+            "verified_via": "dufs-ir",
+            "taint_role": "Reads a whole file by path (arg 0). Covers tokio::fs::read_to_string by short-name."
+        },
+        {
+            "fn_name": "std::fs::read_dir",
+            "category": "data-read",
+            "resource_arg": 0,
+            "resource_prefix": "dir",
+            "return_type": "Result<ReadDir, Error>",
+            "parameter_type": ["P"],
+            "verified_via": "general-knowledge",
+            "taint_role": "Directory listing reads the names of entries under a path (arg 0); for a file server, listing another principal's directory is a cross-user read. Covers tokio::fs::read_dir by short-name."
+        },
+        {
+            "fn_name": "std::fs::File::create",
+            "category": "data-write",
+            "resource_arg": 0,
+            "resource_prefix": "file",
+            "return_type": "Result<File, Error>",
+            "parameter_type": ["P"],
+            "request_index": 0,
+            "verified_via": "dufs-ir",
+            "taint_role": "Creating/truncating a file at a path (arg 0) is the upload write; the path is the written resource, so the uploading principal is seeded onto it. Covers tokio::fs::file::File::create by short-name."
+        },
+        {
+            "fn_name": "std::fs::OpenOptions::open",
+            "category": "data-write",
+            "resource_arg": 1,
+            "resource_prefix": "file",
+            "return_type": "Result<File, Error>",
+            "parameter_type": ["self", "P"],
+            "request_index": 1,
+            "verified_via": "dufs-ir",
+            "taint_role": "The write/append upload path in dufs (OpenOptions::new().write(true)...open(path)); path is arg 1 after the OpenOptions receiver. CAVEAT: OpenOptions::open is also used read-only; cataloged as write because the file-server upload uses it, and a false write only widens the overlap set (sound, handed to dynamic)."
+        },
+        {
+            "fn_name": "std::fs::rename",
+            "category": "data-write",
+            "resource_arg": 1,
+            "resource_prefix": "file",
+            "return_type": "Result<(), Error>",
+            "parameter_type": ["P", "Q"],
+            "request_index": 1,
+            "verified_via": "dufs-ir",
+            "taint_role": "Move/rename writes to the destination path (arg 1). Covers tokio::fs::rename by short-name."
+        },
+        {
+            "fn_name": "std::fs::remove_file",
+            "category": "data-write",
+            "resource_arg": 0,
+            "resource_prefix": "file",
+            "return_type": "Result<(), Error>",
+            "parameter_type": ["P"],
+            "request_index": 0,
+            "verified_via": "dufs-ir",
+            "taint_role": "Delete mutates the file at a path (arg 0). Covers tokio::fs::remove_file by short-name."
+        },
+        {
+            "fn_name": "std::fs::remove_dir_all",
+            "category": "data-write",
+            "resource_arg": 0,
+            "resource_prefix": "dir",
+            "return_type": "Result<(), Error>",
+            "parameter_type": ["P"],
+            "request_index": 0,
+            "verified_via": "dufs-ir",
+            "taint_role": "Recursive directory delete mutates the subtree at a path (arg 0). Covers tokio::fs::remove_dir_all by short-name."
+        }
     ]
 }
