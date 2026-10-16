@@ -9,8 +9,8 @@ LLM API calls and access-control checks in a Rust service. See
 [Attribution](#attribution) for the per-file breakdown.
 
 RAIL can be run as a CLI tool or used as a library (`rail-rs`, `rail_rs`
-crate). As a library it is the static analysis stage of the larger AFG
-pipeline: [afg_prototype](https://github.com/apace-lab/afg_prototype.git) (a sibling project, not in this repo) consumes
+crate). As a library it is the static analysis stage of the larger CRUX
+pipeline: [crux](https://github.com/apace-lab/crux.git) (a sibling project, not in this repo) consumes
 `rail_rs`'s `TaintAnalysis` output to instrument a target app, replay it with
 MadSim, and confirm cross-user leaks dynamically. See
 [TAINT_ANALYSIS.md](TAINT_ANALYSIS.md) for that library API.
@@ -174,7 +174,7 @@ rustc main.rs --crate-name llm_ac_demo --emit=llvm-ir -o llm_ac_demo.ll
 ### Using `rail_rs` as a library
 
 The static taint analysis is also exposed as a library API (`ModuleAnalysis` /
-`CrossModuleAnalysis::taint_analysis`), for consumers like `afg_prototype` that
+`CrossModuleAnalysis::taint_analysis`), for consumers like `crux` that
 need the `TaintAnalysis` result (semantic points, principal contexts, node
 source locations) directly rather than the text dump the CLI writes. See
 [TAINT_ANALYSIS.md](TAINT_ANALYSIS.md) for the full API, including a minimal
