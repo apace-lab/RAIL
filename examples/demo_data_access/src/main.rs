@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use crux_r4_runtime::{with_crux_context, CruxContext};
+use crux_runtime::{with_crux_context, CruxContext};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,

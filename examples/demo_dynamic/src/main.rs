@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use crux_r4_runtime::{with_crux_context, CruxContext};
+use crux_runtime::{with_crux_context, CruxContext};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
@@ -196,8 +196,8 @@ async fn handle(req: Request) -> String {
     let _ = session.role;
 
     if let Some(entry) = cache().lock().unwrap().get(&req.prompt).cloned() {
-        crux_r4_runtime::crux_monitor!(function = CACHE_FN);
-        crux_r4_runtime::crux_access!(node = CACHE_NODE, kind = crux_r4_runtime::AccessKind::Read, function = CACHE_FN);
+        crux_runtime::crux_monitor!(function = CACHE_FN);
+        crux_runtime::crux_access!(node = CACHE_NODE, kind = crux_runtime::AccessKind::Read, function = CACHE_FN);
         if entry.owner_user_id != session.user_id {
             println!(
                 "[leak] {} served a cached answer owned by {}",
@@ -210,8 +210,8 @@ async fn handle(req: Request) -> String {
     let client = async_openai::Client::new();
     let answer = client.chat().create(&req.prompt);
 
-    crux_r4_runtime::crux_monitor!(function = CACHE_FN);
-    crux_r4_runtime::crux_access!(node = CACHE_NODE, kind = crux_r4_runtime::AccessKind::Write, function = CACHE_FN);
+    crux_runtime::crux_monitor!(function = CACHE_FN);
+    crux_runtime::crux_access!(node = CACHE_NODE, kind = crux_runtime::AccessKind::Write, function = CACHE_FN);
     cache().lock().unwrap().insert(
         req.prompt.clone(),
         CacheEntry {

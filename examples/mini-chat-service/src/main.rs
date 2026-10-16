@@ -3,7 +3,7 @@ mod llm;
 mod server;
 mod store;
 
-use crux_r4_runtime::{with_crux_context, CruxContext};
+use crux_runtime::{with_crux_context, CruxContext};
 use server::Request;
 
 // A small multi-user LLM service. Users sign in with a password (argon2) and
