@@ -782,11 +782,24 @@ impl<'m> PrincipalSensitiveAnalysis<'m> {
     }
 
     fn should_propagate_execution_into(&self, callee: &str) -> bool {
-        // Only propagate into functions belonging to the application, identified
-        // by the app-crate prefix derived from the module's `main` (e.g.
-        // "llm_ac_demo"). This replaces the earlier hardcoded crate name.
-        if !self.app_crate.is_empty() && callee.contains(&self.app_crate) {
+        // Propagate into functions belonging to the application. The app crate
+        // derived from `main` is a single crate (e.g. "lemmy_server"), but real
+        // applications are multi-crate workspaces (lemmy_api, lemmy_db_schema,
+        // ...). Matching only the single crate blocks the principal from crossing
+        // from the auth crate to the data-access crate. We therefore also accept
+        // any crate sharing the workspace prefix of the app crate.
+        if self.app_crate.is_empty() {
+            return false;
+        }
+        if callee.contains(&self.app_crate) {
             return true;
+        }
+        let prefix = self.app_crate.split('_').next().unwrap_or(&self.app_crate);
+        if prefix.len() >= 3 {
+            let c = crate::pointer_assignment_graph::parse_app_crate(callee);
+            if c == prefix || c.starts_with(&format!("{prefix}_")) {
+                return true;
+            }
         }
 
         false
