@@ -4851,7 +4851,7 @@ pub fn detect_app_crate<'a>(modules: impl IntoIterator<Item = &'a Module>) -> St
         .unwrap_or_default()
 }
 
-fn parse_app_crate(mangled: &str) -> String {
+pub(crate) fn parse_app_crate(mangled: &str) -> String {
     let s = util::normalize_function_name(mangled).trim_start_matches('_');
     let Some(rest) = s.strip_prefix("ZN") else {
         return String::new();
