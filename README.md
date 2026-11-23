@@ -1,88 +1,60 @@
-# RAIL — Rust Analysis over IR Layers
+# RAIL: Rust Analysis over IR Layers
 
-RAIL is a static-analysis framework for Rust programs, built on their compiled
-LLVM IR. It inherits control-flow/dominance/control-dependence graphs from
-[`llvm-ir-analysis`](https://github.com/cdisselkoen/llvm-ir-analysis) and
-extends its call graph. We add our own family of pointer (points-to)
-analyses — context-insensitive, k-CFA, k-object-sensitive, k-mix — plus a taint analysis purpose-built to find cross-user data leaks between
-LLM API calls and access-control checks in a Rust service. See
-[Attribution](#attribution) for the per-file breakdown.
+RAIL is a whole-program static analysis framework for Rust applications built over compiled LLVM IR. It inherits control-flow, dominator-tree, and control-dependence graph infrastructure from [`llvm-ir-analysis`](https://github.com/cdisselkoen/llvm-ir-analysis) and extends call-graph construction with on-the-fly indirect call resolution. On top of these representations, RAIL implements context-insensitive and context-sensitive pointer analyses alongside **Principal-Sensitive Analysis (PSA)** and **Access-Control Enforcement (ACE)** to detect cross-user data-isolation bugs in concurrent and asynchronous Rust services. See [Attribution](#attribution) for the per-file breakdown.
 
-RAIL can be run as a CLI tool or used as a library (`rail-rs`, `rail_rs`
-crate). As a library it is the static analysis stage of the larger CRUX
-pipeline: [crux](https://github.com/apace-lab/crux.git) (a sibling project, not in this repo) consumes
-`rail_rs`'s `TaintAnalysis` output to instrument a target app, replay it with
-MadSim, and confirm cross-user leaks dynamically. See
-[TAINT_ANALYSIS.md](TAINT_ANALYSIS.md) for that library API.
+RAIL can be run as a standalone CLI binary or linked as a Rust library (`rail-rs` / `rail_rs`). As a library, RAIL provides the static analysis stages of **CRUX**: [`crux`](https://github.com/apace-lab/crux.git) consumes RAIL's PSA and ACE results to construct an instrumentation plan, instrument candidate Rust call sites with R4, and verify cross-user data leaks at runtime. See [PSA.md](PSA.md) for library API documentation.
 
 ## Features
 
-<!-- - **Graph analyses**: control-flow graph, dominator/post-dominator trees, and
-  control dependence graph, inherited from `llvm-ir-analysis` essentially
-  unmodified; the call graph is inherited too but extended in RAIL with
-  reachability queries, common-ancestor lookup, and on-the-fly edge insertion
-  for the pointer analysis below. -->
-- **Pointer analysis** (`--pag=`): builds a pointer assignment graph (PAG) and
-  solves it to a fixed point, in several modes:
-  - `insensitive` — context-insensitive.
-  - `kcfa` — k-call-site-sensitive.
-  - `kobj` — k-object-sensitive (see [Known issues](#known-issues)).
-  - `kmix` — k-object-sensitive + k-CFA hybrid (see [Known issues](#known-issues)).
-  - `afg` — same solver, but also matches call sites against the LLM-API /
-    access-control signature catalogs and records where they land in the
-    points-to graph.
-- **static taint analysis** (`taint_analysis` module): given the `afg`-mode
-  PAG, propagates a *principal* (a static auth call site) from each
-  access-control check through the graph, and reports every node reachable
-  from two or more principals — a static candidate for a cross-user leak —
-  plus the LLM/auth call sites (`SemanticPoint`s) it matched along the way.
+- **Pointer analysis** (`--pag=`): constructs a pointer assignment graph (PAG) with on-the-fly call-graph updates and solves points-to constraints to a fixed point in several modes:
+  - `insensitive` - context-insensitive Andersen-style solver.
+  - `kcfa` - k-call-site-sensitive solver.
+  - `kobj` - k-object-sensitive solver (see [Known issues](#known-issues)).
+  - `kmix` - hybrid k-object-sensitive + k-CFA solver (see [Known issues](#known-issues)).
+  - `crux` - builds the PAG while matching demangled call sites against the authentication/authorization, resource-access, and LLM service signature catalogs.
+- **Principal-Sensitive Analysis (PSA)** (`psa` module): given a `crux`-mode PAG, introduces a distinct principal context at each authentication or authorization check site and propagates principal contexts upward across helper returns, downward across callees, and along value-carrying PAG edges to identify multi-principal nodes and governing checks.
+- **Access-Control Enforcement (ACE)** (`ace`, `guard_inference`, and `debuginfo` modules): recovers Rust composite types from DWARF debug metadata over opaque LLVM pointers (`ptr`), infers boolean check functions, and checks intraprocedural dominance, resource binding, and resource-type matching across call-graph paths.
 
-## Project layout
+## Project Layout
 
-```
+```text
 src/
-  main.rs                     CLI entry point
-  lib.rs                      ModuleAnalysis / CrossModuleAnalysis (public API)
-  call_graph.rs                call graph construction
-  control_flow_graph.rs        per-function CFG
-  dominator_tree.rs             (post-)dominator trees
-  control_dep_graph.rs         control dependence graph
-  functions_by_type.rs          index of functions by signature
-  pointer_assignment_graph.rs  PAG construction + solver (all --pag modes)
-  context.rs                   principal / context propagation for AFG
-  taint_analysis.rs            AFG taint analysis engine (public: taint_analysis)
-  signature.rs                 loads the LLM-API / access-control JSON catalogs
-  util.rs                      CLI flag parsing, file output helpers
+  main.rs                      CLI entry point
+  lib.rs                       ModuleAnalysis / CrossModuleAnalysis (public API)
+  call_graph.rs                Call graph construction and reachability queries
+  control_flow_graph.rs        Per-function CFG
+  dominator_tree.rs            (Post-)dominator trees
+  control_dep_graph.rs         Control dependence graph
+  functions_by_type.rs         Index of functions by LLVM signature
+  pointer_assignment_graph.rs  PAG construction and solver (all --pag modes)
+  context.rs                   Principal and call-site context domains (PAContext)
+  psa.rs                       Principal-Sensitive Analysis (PSA) engine
+  ace.rs                       Access-Control Enforcement (ACE) dominance/binding pass
+  guard_inference.rs           Structural inference of boolean authorization functions
+  debuginfo.rs                 DWARF composite/member type and source-location recovery
+  signature.rs                 JSON API signature catalog loader and symbol matcher
+  util.rs                      CLI flag parsing and output helpers
 
-signatures/                   default LLM API / access-control / input-source
-                               catalogs (Rust and JS/TS variants) used by --api=/--ac=
-examples/                     sample Rust crates used as analysis fixtures
-tests/                        pre-compiled .ll fixtures + PAG integration tests
+signatures/                    Declarative JSON API signature catalogs
+examples/                      Sample Rust crates used as analysis and end-to-end fixtures
+tests/                         Pre-compiled .ll fixtures and PAG integration tests
 ```
-Provenance (what's inherited from `llvm-ir-analysis` vs. original to RAIL) is
-covered per-file in [Attribution](#attribution); this section is just what
-each file is for.
-
 
 ## Prerequisites
 
-RAIL parses real LLVM IR, so its LLVM version must match the toolchain that
-produced the `.ll` file:
+RAIL parses LLVM IR bitcode/text directly, so its LLVM library version must match the Rust toolchain used to emit `.ll` files:
 
-- LLVM **19.1.7**, via rustc **1.82.0** -- rustc **1.86.0**. 
-- `zlib1g-dev` (`sudo apt install zlib1g-dev`).
+- LLVM **19.1.7**, via `rustc` **1.82.0** to **1.86.0** (e.g., `1.85.0`).
+- `zlib1g-dev` (`sudo apt install zlib1g-dev` on Ubuntu/Debian).
 
-Check what you have:
+Verify your local toolchain:
 
 ```bash
 llvm-config --version      # should print 19.x.x
-rustc -vV | grep LLVM      # confirms the rustc <-> LLVM mapping above
+rustc -vV | grep LLVM      # confirms rustc's bundled LLVM version
 ```
 
-If you're not on LLVM 19, either install it (see
-[Troubleshooting](#troubleshooting)) or use `switch-version.sh` to switch, and
-set the matching `features = ["llvm-19"]` (or the appropriate version) on the
-`llvm-ir` dependency in `Cargo.toml`.
+If needed, use `switch-version.sh` or set `LLVM_SYS_191_PREFIX` to point to your LLVM 19 installation.
 
 ## Build
 
@@ -92,128 +64,103 @@ cargo build
 
 ## Usage
 
-RAIL takes one or more `.ll` files (produced by `rustc --emit=llvm-ir`) and a
-set of flags selecting which analyses to run and where to write them:
+RAIL accepts one or more `.ll` files (emitted via `rustc --emit=llvm-ir`) and flags selecting which analyses to run:
 
-```
-cargo run -- <input.ll> [more.ll ...] [--pag=<mode>] [--k=N] [--api=..] [--ac=..] [--info] [--cfg] [--cg]
+```text
+cargo run -- <input.ll> [more.ll ...] [--pag=<mode>] [--k=N] [--api=..] [--ac=..] [--data=..] [--info] [--cfg] [--cg]
 ```
 
-| flag | effect |
+| Flag | Effect |
 |---|---|
-| `--info` | dump parsed module info to `parsed_module.txt` |
-| `--cfg` | dump each function's CFG to `cfg.txt` |
-| `--cg` | dump the (cross-module) call graph to `cg.txt` |
-| `--pag=<mode>` | build a PAG; `mode` is `insensitive`, `kcfa`, `kobj`, `kmix`, or `afg`. Writes points-to constraints to `pag.txt`, points-to sets to `points_to.txt`, and statistics to the console |
-| `--k=N` | max context length, required for `kcfa` / `kobj` / `kmix` |
-| `--api=<path>` | LLM-API signature catalog (`afg` mode); defaults to `signatures/llm_api_functions.json` |
-| `--ac=<path>` | access-control signature catalog (`afg` mode); defaults to `signatures/ac_functions.json` |
+| `--info` | Write parsed module summary to `parsed_module.txt` |
+| `--cfg` | Write each function's CFG to `cfg.txt` |
+| `--cg` | Write the cross-module call graph to `cg.txt` |
+| `--pag=<mode>` | Build a PAG (`insensitive`, `kcfa`, `kobj`, `kmix`, or `crux`), writing constraints to `pag.txt` and points-to sets to `points_to.txt` |
+| `--k=N` | Maximum context depth (required for `kcfa`, `kobj`, and `kmix`) |
+| `--api=<path>` | Sensitive LLM service catalog (`crux` mode); defaults to `signatures/llm_api_functions.json` |
+| `--ac=<path>` | Authentication/authorization catalog (`crux` mode); defaults to `signatures/ac_functions.json` |
+| `--data=<path>` | Resource-access catalog (`crux` mode); defaults to `signatures/data_access_functions.json` |
 
-Multiple input files are analyzed together as one cross-module program (e.g.
-a crate's `lib` + `bin`, where `main` lives in the bin but most code is in the
-lib).
+Multiple `.ll` files passed on the command line are analyzed together as one cross-module program (e.g., workspace crates or a crate's `lib` + `bin` targets).
 
-### Generate a `.ll` input
+### Generating `.ll` Inputs
+
+Single file:
 
 ```bash
 cd examples/hello_world
 rustc src/main.rs --emit=llvm-ir -o hello.ll
 ```
 
-or, for a full cargo project (needed for AFG's source-location mapping, which
-requires debug info):
+Full Cargo crate with DWARF debug metadata (used by CRUX for source-location and struct-type recovery):
 
 ```bash
-cargo rustc -- --emit=llvm-ir -C debuginfo=2
+cargo rustc -- --emit=llvm-ir -C debuginfo=2 -C codegen-units=1
 ```
 
-### Example commands
+### Example Commands
 
 ```bash
-# silence build warnings while running
+# Basic run without warnings
 RUSTFLAGS=-Awarnings cargo run -q -- tests/hello.ll
 
-# full debug logging
+# Verbose debug logging
 RUST_LOG=rail_rs=debug cargo run -- tests/demo.ll 2> debug.log
 
-# k-CFA pointer analysis, context depth 3
+# k-CFA pointer analysis with k=3
 RUSTFLAGS=-Awarnings cargo run -q -- tests/llm_ac_demo.ll --pag=kcfa --k=3
 
-# AFG mode with the default catalogs
-RUSTFLAGS=-Awarnings cargo run -q -- tests/llm_api_ac.ll --pag=afg
+# CRUX mode with default signature catalogs
+RUSTFLAGS=-Awarnings cargo run -q -- tests/llm_api_ac.ll --pag=crux
 
-# AFG mode with explicit catalogs
+# CRUX mode with explicit catalog paths
 RUSTFLAGS=-Awarnings cargo run -q -- \
-    tests/llm_api_ac.ll --pag=afg \
+    tests/llm_api_ac.ll --pag=crux \
     --api=signatures/llm_api_functions.json \
-    --ac=signatures/ac_functions.json
+    --ac=signatures/ac_functions.json \
+    --data=signatures/data_access_functions.json
 ```
 
-### AFG: finding LLM API / access-control context points
+### Catalog Matching in `crux` Mode
 
-When both `--api=` and `--ac=` are given (or `afg` mode falls back to the
-defaults), the analysis also locates LLM-API and access-control call sites: it
-matches the demangled callee against the `fn_name`s in
-`signatures/llm_api_functions.json` and `signatures/ac_functions.json`
-(suffix match, then last-two-segment short name). Results go to
-`context_points.txt`, with each matched call site listed alongside the
-points-to sets of its arguments and result (resolved after the fixed point) —
-tying the catalog match back into the pointer analysis.
+In `--pag=crux` mode, RAIL matches demangled call targets against the `fn_name` entries in `signatures/llm_api_functions.json`, `signatures/ac_functions.json`, and `signatures/data_access_functions.json` (by full suffix match, then last-two-segment `Type::method` match). Matched sites are written to `context_points.txt` alongside the resolved points-to sets of their arguments and return values.
 
-`examples/llm_ac_demo/` is a small self-contained fixture for this: a
-two-user shared-cache demo plus stubbed LLM calls (`async-openai`, `ollama`)
-and access-control calls (`jsonwebtoken`, `bcrypt`, `argon2`, `ldap3`,
-`oauth2`, `actix-identity`, `casbin`) whose paths match the catalogs.
-Regenerate its `.ll` with an LLVM-19 rustc:
+`examples/llm_ac_demo/` provides a self-contained two-user shared-cache fixture with stubbed LLM (`async-openai`, `ollama`) and authentication/authorization (`jsonwebtoken`, `bcrypt`, `argon2`, `ldap3`, `oauth2`, `actix-identity`, `casbin`) calls:
 
 ```bash
 cd examples/llm_ac_demo/
 rustc main.rs --crate-name llm_ac_demo --emit=llvm-ir -o llm_ac_demo.ll
 ```
 
-### Using `rail_rs` as a library
+### Using `rail_rs` as a Library
 
-The static taint analysis is also exposed as a library API (`ModuleAnalysis` /
-`CrossModuleAnalysis::taint_analysis`), for consumers like `crux` that
-need the `TaintAnalysis` result (semantic points, principal contexts, node
-source locations) directly rather than the text dump the CLI writes. See
-[TAINT_ANALYSIS.md](TAINT_ANALYSIS.md) for the full API, including a minimal
-working example and field reference.
+PSA and ACE are exposed through `ModuleAnalysis` and `CrossModuleAnalysis` (e.g., `CrossModuleAnalysis::psa("crux", None)` returning `PrincipalSensitiveAnalysis`, plus `rail_rs::ace` and `rail_rs::debuginfo`) for downstream tools such as [`crux`](https://github.com/apace-lab/crux.git). See [PSA.md](PSA.md) for a complete working example and API reference.
 
 ## Examples
 
-| example | what it demonstrates |
+| Example | Description |
 |---|---|
-| `hello_world` | minimal fixture for exercising the CLI end to end |
-| `demo`, `tokio-demo`, `channel-test` | small fixtures for specific IR shapes (async, channels) |
-| `llm-api-demo` | intentionally vulnerable interactive CLI: multi-user auth, OpenAI/Ollama SDK calls, an in-memory cache keyed without the user ID — so one user can receive another's cached LLM response |
-| `llm-api-ac` | backend-only variant: Argon2 password auth, JWT bearer tokens, role-based authorization |
-| `llm_ac_demo` | fixture matching the default LLM-API / access-control signature catalogs, for exercising `--pag=afg` |
-| `mini-chat-service` | real-app-shaped multi-user LLM service (argon2 auth, bearer tokens, shared cache) used to validate the full AFG pipeline end to end |
-| `demo_dynamic` (`crux_dyn_demo`) | single-file MadSim counterpart to `mini-chat-service`, for exercising AFG's dynamic per-user replay stage |
+| `hello_world` | Minimal fixture exercising the CLI end to end |
+| `demo`, `tokio-demo`, `channel-test` | Small fixtures covering async tasks and channel IR patterns |
+| `llm-api-demo` | Multi-user CLI fixture with OpenAI/Ollama calls and a non-user-scoped shared cache |
+| `llm-api-ac` | Backend fixture with Argon2 password checks, JWT bearer tokens, and role checks |
+| `llm_ac_demo` | Fixture matching the default signature catalogs under `--pag=crux` |
+| `mini-chat-service` | Multi-module multi-user LLM chat service (Argon2 auth, JWT tokens, shared cache) for end-to-end CRUX validation |
+| `demo_dynamic` (`crux_dyn_demo`) | Single-file MadSim counterpart to `mini-chat-service` exercising CRUX's dynamic replay stage |
+| `demo_data_access` (`crux_data_demo`) | Database-backed multi-user fixture exercising catalog-driven SQL read/write discovery |
 
-## Known issues
+## Known Issues
 
-- **`kobj`**: direct calls are recorded as `DirectCall` edges and resolved
-  lazily by the solver from `pts(receiver_arg)`. For most cases that points-to
-  set never gets populated, so the callee is never analyzed — this loses
-  reachability (missing functions/nodes/edges) and needs revisiting.
-- **`kmix`**: built on `kobj`, so it inherits the same issue.
-- `insensitive` and `kcfa` are solid; `afg` (which uses call-site context) is
-  the mode exercised most.
+- **`kobj`**: direct calls are recorded as `DirectCall` edges and resolved lazily from `pts(receiver_arg)`; when receiver points-to sets remain empty, callees are skipped.
+- **`kmix`**: inherits the same limitation from `kobj`.
+- `insensitive`, `kcfa`, and `crux` modes are well-tested; `crux` is the primary mode used by CRUX.
 
-## Special-cased handling
+## Special-Cased Rust/LLVM Constructs
 
-To keep the pointer analysis tractable, a few LLVM/Rust constructs get
-dedicated handling rather than generic modeling:
+- Solver-level: on-the-fly indirect call resolution, cleanup/unwind block filtering (`skip_cleanup_blocks`), and trait-object vtable dispatch.
+- Rust intrinsics and standard allocations (`handle_special_rust_functions`): `llvm.memcpy`, heap allocation (`__rust_alloc`, `alloc::alloc::alloc`, `raw_vec::RawVec`), `Deref::deref`, and `Arc::clone`.
 
-- Solver-level: `on_the_fly` call resolution, `skip_cleanup_blocks`, `vtable`
-  dispatch.
-- Special Rust functions (`handle_special_rust_functions`): `llvm.memcpy`,
-  heap allocation (`__rust_alloc`, `alloc::alloc::alloc`, `raw_vec::RawVec`),
-  `Deref::deref`, `Arc::clone`.
-
-## Running on a real-world crate (`lencx/ChatGPT`)
+## Running on an External Rust Crate
 
 ```bash
 git clone https://github.com/lencx/ChatGPT.git
@@ -222,30 +169,26 @@ rustup run nightly-2025-02-01 cargo rustc --bin chatgpt --release -- \
     -C codegen-units=1 --emit=llvm-ir=/tmp/chatgpt_lencx.ll
 
 cd <rail>
-RUSTFLAGS=-Awarnings cargo run -q --release -- /tmp/chatgpt_lencx.ll --pag=afg \
+RUSTFLAGS=-Awarnings cargo run -q --release -- /tmp/chatgpt_lencx.ll --pag=crux \
   --api=signatures/llm_api_functions.json \
   --ac=signatures/ac_functions.json
 ```
 
 ## Troubleshooting
 
-**`openssl-sys` / `javascriptcore-rs-sys` build errors mentioning `pkg-config`**
-— install `pkg-config` and the missing system dev packages (these come from
-transitive dependencies of example crates, not from `rail-rs` itself).
+**`openssl-sys` / `javascriptcore-rs-sys` build errors mentioning `pkg-config`**: install `pkg-config` and the corresponding system development libraries (used by example crates, not by `rail-rs` itself).
 
-**`could not find native static library 'Polly'`** — install the matching
-LLVM version and its Polly dev package:
+**`could not find native static library 'Polly'`**: install LLVM 19's Polly development package:
 
 ```bash
 wget https://apt.llvm.org/llvm.sh
 chmod +x llvm.sh
-sudo ./llvm.sh <version>
+sudo ./llvm.sh 19
 sudo apt update
 sudo apt install libpolly-19-dev
 ```
 
-**`indexmap` requires Cargo feature 'edition2024'`** — your cargo is older
-than the crate needs; pin an older `indexmap`:
+**`indexmap` requires Cargo feature `edition2024`**: pin an older `indexmap` on older Cargo versions:
 
 ```bash
 cargo update -p indexmap --precise 2.7.1
@@ -253,34 +196,31 @@ cargo update -p indexmap --precise 2.7.1
 
 ## Attribution
 
-Built on [`llvm-ir`](https://github.com/cdisselkoen/llvm-ir) as a library.
-Several files started from
-[`llvm-ir-analysis`](https://github.com/cdisselkoen/llvm-ir-analysis), to
-varying degrees:
+Built on [`llvm-ir`](https://github.com/cdisselkoen/llvm-ir). Several foundational graph modules were adapted from [`llvm-ir-analysis`](https://github.com/cdisselkoen/llvm-ir-analysis):
 
-| file | from `llvm-ir-analysis` | original to RAIL |
+| File | From `llvm-ir-analysis` | Original to RAIL |
 |---|---|---|
-| `src/dominator_tree.rs` | copied verbatim | — |
-| `src/control_dep_graph.rs` | copied verbatim | — |
-| `src/functions_by_type.rs` | copied, +1 derive attribute | — |
-| `src/control_flow_graph.rs` | `ControlFlowGraph`/`CFGNode` construction | `print_cfg()` |
-| `src/call_graph.rs` | `CallGraph::new()` and the basic `callers`/`callees` accessors | `pub` graph field, `empty()`, `has_call_edge`/`add_call_edge`, `is_reachable`, `find_closest_common_root` (+ helpers), `print_call_graph()` |
-| `src/lib.rs` | the `ModuleAnalysis`/`CrossModuleAnalysis`/`FunctionAnalysis`/`SimpleCache` structure and its existing call-graph/CFG accessors | all wiring for `pointer_assignment_graph`, `taint_analysis`, `signature`, `context`, `util` |
+| `src/dominator_tree.rs` | Copied verbatim | - |
+| `src/control_dep_graph.rs` | Copied verbatim | - |
+| `src/functions_by_type.rs` | Copied (+1 derive attribute) | - |
+| `src/control_flow_graph.rs` | `ControlFlowGraph` / `CFGNode` construction | `print_cfg()` |
+| `src/call_graph.rs` | `CallGraph::new()` and basic `callers`/`callees` accessors | `pub` graph field, `empty()`, `has_call_edge`/`add_call_edge`, `is_reachable`, `find_closest_common_root`, `print_call_graph()` |
+| `src/lib.rs` | `ModuleAnalysis` / `CrossModuleAnalysis` / `FunctionAnalysis` / `SimpleCache` skeleton | Wiring for `pointer_assignment_graph`, `psa`, `ace`, `guard_inference`, `debuginfo`, `signature`, `context`, `util` |
 
-### Original to RAIL (no upstream equivalent, not derived from anything)
-- `src/pointer_assignment_graph.rs` — the PAG construction and all pointer-analysis solver modes (`insensitive`/`kcfa`/`kobj`/`kmix`/`afg`)
-- `src/context.rs` — the `PAContext`/`PAContextElem` principal/context model
-- `src/signature.rs` — the LLM-API/access-control catalog matching
-- `src/taint_analysis.rs` — the AFG taint-propagation engine
-- `src/util.rs` — CLI flag/file helpers
-- `src/main.rs` — the CLI itself
-- everything under `signatures/`, `examples/`, `tests/`
+### Original to RAIL
+
+- `src/pointer_assignment_graph.rs` - PAG construction and pointer-analysis solvers (`insensitive`, `kcfa`, `kobj`, `kmix`, `crux`)
+- `src/context.rs` - `PAContext` / `PAContextElem` principal and call-site context domains
+- `src/psa.rs` - Principal-Sensitive Analysis (PSA) propagation engine
+- `src/ace.rs` - Access-Control Enforcement (ACE) dominance, resource-binding, and type-disjointness pass
+- `src/guard_inference.rs` - Structural inference of boolean access-control functions
+- `src/debuginfo.rs` - DWARF composite/member type and source-location recovery
+- `src/signature.rs` - Declarative API signature catalog loader and symbol matcher
+- `src/util.rs` and `src/main.rs` - CLI driver and helpers
+- `signatures/`, `examples/`, and `tests/`
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).
 
-The portions listed above as copied or adapted from `llvm-ir-analysis`
-(Copyright (c) 2020 Craig Disselkoen, also MIT) carry that project's copyright
-notice in addition to this repo's, per the MIT license's notice-preservation
-requirement.
+Portions copied or adapted from `llvm-ir-analysis` (Copyright (c) 2020 Craig Disselkoen, MIT License) retain their upstream copyright notice alongside this repository's license.

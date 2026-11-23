@@ -24,7 +24,7 @@ LL=$(ls -t target/debug/deps/crux_dyn_demo-*.ll | head -1)
 # 2) producer -> instrument -> observe(MadSim) -> analyze -> schedule -> replay
 cd ../../../crux
 LLVM_SYS_191_PREFIX=/opt/homebrew/opt/llvm@19 \
-  ./target/debug/afg --llvm-ir "../rail_rs/examples/demo_dynamic/$LL" \
+  ./target/debug/crux --llvm-ir "../rail_rs/examples/demo_dynamic/$LL" \
   --project ../rail_rs/examples/demo_dynamic \
   --run-dir /tmp/crux_dyn --cargo-cmd run --seeds 1 --replay
 ```

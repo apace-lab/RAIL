@@ -36,12 +36,12 @@ Mode is a CLI flag, no rebuild needed:
 ./target/debug/rail_rs tests/pag/context/identity_return.ll --pag=kcfa --k=1
 # insensitive
 ./target/debug/rail_rs tests/pag/context/identity_return.ll --pag=insensitive
-# afg mode (loads catalogs, records context points)
-./target/debug/rail_rs <in.ll> --pag=afg --api=signatures/llm_api_functions.json --ac=signatures/ac_functions.json
+# crux mode (loads catalogs, records context points)
+./target/debug/rail_rs <in.ll> --pag=crux --api=signatures/llm_api_functions.json --ac=signatures/ac_functions.json
 cat points_to.txt
 ```
 
-Modes: kcfa/kobj/kmix (need `--k=`), afg, anything else falls back to insensitive.
+Modes: kcfa/kobj/kmix (need `--k=`), crux, anything else falls back to insensitive.
 
 ## basic (same answer in every mode)
 

@@ -40,7 +40,7 @@ LL=$(ls -t target/debug/deps/mini_chat_service-*.ll | head -1)
 # 2) producer -> instrument -> observe(MadSim) -> analyze -> schedule -> replay
 cd ../../../crux
 LLVM_SYS_191_PREFIX=/opt/homebrew/opt/llvm@19 \
-  ./target/debug/afg --llvm-ir "../rail_rs/examples/mini-chat-service/$LL" \
+  ./target/debug/crux --llvm-ir "../rail_rs/examples/mini-chat-service/$LL" \
   --project ../rail_rs/examples/mini-chat-service \
   --run-dir /tmp/crux_mini --cargo-cmd run --seeds 1 --replay
 ```

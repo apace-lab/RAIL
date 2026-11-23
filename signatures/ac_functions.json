@@ -40,7 +40,7 @@
             "principal_from_return": true,
             "principal_expr": "{}",
             "verified_via": "lemmy-0.19.0-source",
-            "taint_role": "Per-request JWT validation; returns the authenticated LocalUserId, which is the principal. The call is wrapped to capture its return and establish the task principal for the whole request. Matched by short-name Claims::validate."
+            "psa_role": "Per-request JWT validation; returns the authenticated LocalUserId, which is the principal. The call is wrapped to capture its return and establish the task principal for the whole request. Matched by short-name Claims::validate."
         }
     ],
 
@@ -53,7 +53,7 @@
             "principal_from_return": true,
             "principal_expr": "{}.0",
             "verified_via": "dufs-ir",
-            "taint_role": "dufs authenticates each request in AccessControl::guard, which returns (Option<username>, access paths). The username (ret.0) is the principal; it is established per request at the top of the handler and threaded into every file access, so capturing it from the return establishes the task principal. Short-name AccessControl::guard matches the method call."
+            "psa_role": "dufs authenticates each request in AccessControl::guard, which returns (Option<username>, access paths). The username (ret.0) is the principal; it is established per request at the top of the handler and threaded into every file access, so capturing it from the return establishes the task principal. Short-name AccessControl::guard matches the method call."
         }
     ],
 
@@ -132,7 +132,7 @@
             "return_type": "Result<TokenData<T>, Error>",
             "parameter_type": ["&str", "&DecodingKey", "&Validation"],
             "verified_via": "general-knowledge",
-            "taint_role": "primary JWT verification entry point (signature + claims validation); the actual access-control decision. NOTE: this is the crate re-export path; the real symbol is jsonwebtoken::decoding::decode (below), matched at real call sites"
+            "psa_role": "primary JWT verification entry point (signature + claims validation); the actual access-control decision. NOTE: this is the crate re-export path; the real symbol is jsonwebtoken::decoding::decode (below), matched at real call sites"
         },
         {
             "fn_name": "jsonwebtoken::decoding::decode",
@@ -140,7 +140,7 @@
             "return_type": "Result<TokenData<T>, Error>",
             "parameter_type": ["&str", "&DecodingKey", "&Validation"],
             "verified_via": "tabby 21b2904 ee/tabby-webserver/src/jwt.rs (real demangled symbol jsonwebtoken::decoding::decode)",
-            "taint_role": "actual defining module path of jsonwebtoken::decode; this is what appears in demangled call sites"
+            "psa_role": "actual defining module path of jsonwebtoken::decode; this is what appears in demangled call sites"
         },
         {
             "fn_name": "jsonwebtoken::decode_header",
@@ -148,7 +148,7 @@
             "return_type": "Result<Header, Error>",
             "parameter_type": ["&str"],
             "verified_via": "general-knowledge",
-            "taint_role": "reads the unverified header only (e.g. to pick a key id) - not itself a verification step; but commonly sits right before jsonwebtoken::decode"
+            "psa_role": "reads the unverified header only (e.g. to pick a key id) - not itself a verification step; but commonly sits right before jsonwebtoken::decode"
         }
     ],
 
@@ -274,7 +274,7 @@
             "return_type": "Result<Response, reqwest::Error>",
             "parameter_type": ["self"],
             "verified_via": "ambient",
-            "taint_role": "catch-all for calls to an external authn/authz service (OAuth2/OIDC provider, OPA, Vault, Keycloak) made without an SDK; ac_hint narrows this using nearby string literals via ac_hints.rs"
+            "psa_role": "catch-all for calls to an external authn/authz service (OAuth2/OIDC provider, OPA, Vault, Keycloak) made without an SDK; ac_hint narrows this using nearby string literals via ac_hints.rs"
         },
         {
             "fn_name": "reqwest::blocking::RequestBuilder::send",
@@ -282,7 +282,7 @@
             "return_type": "Result<Response, reqwest::Error>",
             "parameter_type": ["self"],
             "verified_via": "ambient",
-            "taint_role": "blocking counterpart to reqwest::RequestBuilder::send; same catch-all role"
+            "psa_role": "blocking counterpart to reqwest::RequestBuilder::send; same catch-all role"
         }
     ]
 }

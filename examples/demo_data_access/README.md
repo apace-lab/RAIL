@@ -31,7 +31,7 @@ LL=$(ls -t target/debug/deps/crux_data_demo-*.ll | head -1)
 SIGS=$(cd ../../signatures && pwd)
 cd ../../../crux
 LLVM_SYS_191_PREFIX=/opt/homebrew/opt/llvm@19 \
-  ./target/debug/afg --llvm-ir "../rail-rs/examples/demo_data_access/$LL" \
+  ./target/debug/crux --llvm-ir "../rail-rs/examples/demo_data_access/$LL" \
   --project ../rail-rs/examples/demo_data_access \
   --llm-api "$SIGS/llm_api_functions.json" \
   --ac "$SIGS/ac_functions.json" \

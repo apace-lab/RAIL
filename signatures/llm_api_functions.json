@@ -1,7 +1,7 @@
 {
     "_schema_notes": {
-        "purpose": "Reference dataset of LLM SDK request-entry functions. STPA treats matching calls as black-box nodes in the PAG: taint flows from inputs to outputs by a summary rule (Item 2) instead of descending into the callee.",
-        "usage": "For runtime use, copy entries into an example's taint_config.json under the \"taint\" array. fn_name must match the demangled Rust symbol; return_type and parameter_type are checked by PointerAnalysis::isTaintedFunction (PointerAnalysis.cpp:1892).",
+        "purpose": "Reference dataset of sensitive LLM SDK request-entry functions. Principal-Sensitive Analysis (PSA) and Access-Control Enforcement (ACE) match call sites against these signatures over the PAG and call graph.",
+        "usage": "Loaded by rail-rs/src/signature.rs load_signatures (--api=signatures/llm_api_functions.json). fn_name is matched against demangled Rust call targets by full path suffix or last-two-segment Type::method short name.",
         "match_rule": "demangled(callee) == fn_name AND returnType matches AND parameter_type.size() <= callee.arg_size()",
         "self_convention": "For methods, the receiver (&self / &mut self) is included as the first entry of parameter_type, matching the convention used in rust_input_functions.json for Tabby's chat/chat_stream."
     },
@@ -212,7 +212,7 @@
                 "&str"
             ],
             "verified_via": "docs.rig.rs/docs/concepts/completion",
-            "taint_role": "provider-agnostic entry point; rig-core is a multi-provider framework (Anthropic, OpenAI, Gemini, Cohere, Mistral, xAI, DeepSeek, Groq, Ollama, and more) built on the same CompletionModel trait, so this single signature covers call sites regardless of which provider client backs the Agent"
+            "psa_role": "provider-agnostic entry point; rig-core is a multi-provider framework (Anthropic, OpenAI, Gemini, Cohere, Mistral, xAI, DeepSeek, Groq, Ollama, and more) built on the same CompletionModel trait, so this single signature covers call sites regardless of which provider client backs the Agent"
         },
         {
             "fn_name": "rig::completion::CompletionModel::completion",
@@ -222,7 +222,7 @@
                 "CompletionRequest"
             ],
             "verified_via": "docs.rig.rs/docs/concepts/completion",
-            "taint_role": "lower-level trait method implemented per-provider (rig::providers::anthropic, ::openai, ::gemini, etc.); catches direct completion-model usage bypassing the Agent/Prompt wrapper"
+            "psa_role": "lower-level trait method implemented per-provider (rig::providers::anthropic, ::openai, ::gemini, etc.); catches direct completion-model usage bypassing the Agent/Prompt wrapper"
         }
     ],
     "gemini-rust": [
@@ -233,7 +233,7 @@
                 "&self"
             ],
             "verified_via": "context7:/flachesis/gemini-rust",
-            "taint_role": "builder-entry; taint actually flows at GenerateContentBuilder::execute/execute_stream — treat either as the black-box point"
+            "psa_role": "builder-entry; principal context propagates at GenerateContentBuilder::execute/execute_stream — treat either as the black-box point"
         },
         {
             "fn_name": "gemini_rust::GenerateContentBuilder::execute",
@@ -270,7 +270,7 @@
                 "impl Fn(String) -> Future<Output = ()>"
             ],
             "verified_via": "github:mixpeal/anthropic-sdk (real crate, crates.io name \"anthropic-sdk\") — builder-style API: Client::new(key).messages().model(...).build()?.execute(callback).await; the callback receives streamed text chunks. Corrects the prior guess of a `.send()` method returning a plain response struct — the real entry point is `.execute()` on the built Request and is streaming-callback-shaped, not request/response-shaped.",
-            "taint_role": "builder-entry; the actual black-box call is `.execute()`, reached only after `.build()?` on the request builder chain"
+            "psa_role": "builder-entry; the actual black-box call is `.execute()`, reached only after `.build()?` on the request builder chain"
         }
     ],
     "misanthropic": [
@@ -303,7 +303,7 @@
                 "&Prompt"
             ],
             "verified_via": "docs.rs:/llm-chain/latest/llm_chain/traits/trait.Executor.html — corrects the prior guess of module path `llm_chain::executor::Executor`: the `executor` module only holds the `executor!` construction macro, the trait itself lives in `llm_chain::traits`. execute() is async_trait-boxed (returns a pinned future); Result<Output, ExecutorError> is the future's Output type.",
-            "taint_role": "single-step black-box entry point; per-backend executors (llm-chain-openai, llm-chain-llama, etc.) all implement this trait method"
+            "psa_role": "single-step black-box entry point; per-backend executors (llm-chain-openai, llm-chain-llama, etc.) all implement this trait method"
         },
         {
             "fn_name": "llm_chain::chains::sequential::Chain::run",
@@ -327,7 +327,7 @@
                 "Option<&ChatOptions>"
             ],
             "verified_via": "docs.rs:/genai — confirmed via Client::exec_chat docs; model param is generic `impl Into<ModelSpec>` (accepts &str literals, ModelIden, or ServiceTarget) rather than a bare &str, but a plain string literal argument still matches at a call site",
-            "taint_role": "genai is a multi-provider client (OpenAI, Anthropic, Gemini, xAI/Grok, Ollama, Groq, DeepSeek, Cohere, Together, and more) — this single signature covers call sites regardless of which backing provider is targeted"
+            "psa_role": "genai is a multi-provider client (OpenAI, Anthropic, Gemini, xAI/Grok, Ollama, Groq, DeepSeek, Cohere, Together, and more) — this single signature covers call sites regardless of which backing provider is targeted"
         },
         {
             "fn_name": "genai::Client::exec_chat_stream",
@@ -349,7 +349,7 @@
                 "self"
             ],
             "verified_via": "ambient",
-            "taint_role": "catch-all for LPAs that call provider HTTP APIs directly without an SDK; narrower match should be applied via URL/host predicate once we add that capability to STPA"
+            "psa_role": "catch-all for LPAs that call provider HTTP APIs directly without an SDK; narrower match should be applied via URL/host predicate once we add that capability to STPA"
         },
         {
             "fn_name": "reqwest::blocking::RequestBuilder::send",
@@ -358,7 +358,7 @@
                 "self"
             ],
             "verified_via": "ambient",
-            "taint_role": "blocking (sync) counterpart to reqwest::RequestBuilder::send; same catch-all role for LPAs using the blocking client"
+            "psa_role": "blocking (sync) counterpart to reqwest::RequestBuilder::send; same catch-all role for LPAs using the blocking client"
         }
     ]
 }

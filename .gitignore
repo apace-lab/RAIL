@@ -1,7 +1,7 @@
 *.log
 *.txt
 target
-taint_config.json
+psa_config.json
 tests/chatgpt_lencx.ll
 tests/bionic-gpt_6a82275_web_server_llvm20.ll
 tests/hub_e1be468_bin.ll

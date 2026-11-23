@@ -1087,7 +1087,7 @@ impl<'m> PrincipalSensitiveAnalysis<'m> {
     }
 
     pub fn print_result(&self) {
-        println!("\n========== Static Taint Analysis ==========");
+        println!("\n========== Principal-Sensitive Analysis (PSA) ==========");
 
         let mut node_ids: Vec<PANodeId> = self.node_contexts.keys().copied().collect();
 

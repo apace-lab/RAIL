@@ -1,6 +1,6 @@
 {
     "_schema_notes": {
-        "purpose": "Reference dataset of database / shared data-store access methods in common Rust web-app stacks (SQL, ORMs, NoSQL/KV, in-process cache libraries). The data-store counterpart to llm_api_functions.json and ac_functions.json. AFG treats a matching call as a shared-resource access point: taint (principal) contexts are seeded at it, so two principals reaching the same store node surface as a cross-user overlap, and a write-then-read across principals is the leak.",
+        "purpose": "Reference dataset of database / shared data-store access methods in common Rust web-app stacks (SQL, ORMs, NoSQL/KV, in-process cache libraries). The data-store counterpart to llm_api_functions.json and ac_functions.json. CRUX treats a matching call as a shared-resource access point: principal contexts (PSA) are seeded at it, so two principals reaching the same store node surface as a cross-user overlap, and a write-then-read across principals is the leak.",
         "usage": "Loaded by rail-rs/src/signature.rs load_signatures and matched by the same demangled-symbol matcher used for the LLM/AC catalogs (suffix match on the full path, or a last-two-segment short-name match). No type checking is done; only fn_name (plus category and, for writes, request_index) is read.",
         "match_rule": "demangled(callee) == fn_name, OR demangled(callee) ends_with ::fn_name, OR last-two-segments(demangled) == last-two-segments(fn_name). Because real symbols carry crate-internal prefixes (e.g. sqlx_core::), most entries match via the last-two-segment short name (Type::method); keep that pair specific.",
         "category_values": "data-read (a read/query that returns stored data; the leak-exposing direction) | data-write (an insert/update/store that puts data into the shared store)",
@@ -58,7 +58,7 @@
             "return_type": "Result<DB::QueryResult, Error>",
             "parameter_type": ["self", "E"],
             "verified_via": "general-knowledge",
-            "taint_role": "INSERT/UPDATE/DELETE; the stored value is bound onto the Query receiver (self) before execute, so the write data travels with the receiver rather than a separate argument"
+            "psa_role": "INSERT/UPDATE/DELETE; the stored value is bound onto the Query receiver (self) before execute, so the write data travels with the receiver rather than a separate argument"
         }
     ],
 
@@ -97,7 +97,7 @@
             "return_type": "QueryResult<usize>",
             "parameter_type": ["self", "&mut Conn"],
             "verified_via": "general-knowledge",
-            "taint_role": "runs INSERT/UPDATE/DELETE built on the receiver; the written values ride on self"
+            "psa_role": "runs INSERT/UPDATE/DELETE built on the receiver; the written values ride on self"
         }
     ],
 
@@ -122,7 +122,7 @@
             "return_type": "Select<Self>",
             "parameter_type": ["V"],
             "verified_via": "general-knowledge",
-            "taint_role": "builder entry; the store read happens at Select::one/all, but find_by_id marks the by-id lookup that is the classic IDOR shape"
+            "psa_role": "builder entry; the store read happens at Select::one/all, but find_by_id marks the by-id lookup that is the classic IDOR shape"
         },
         {
             "fn_name": "sea_orm::ActiveModelTrait::insert",
@@ -317,7 +317,7 @@
             "return_type": "Option<V>",
             "parameter_type": ["&self", "&Q"],
             "verified_via": "general-knowledge",
-            "taint_role": "in-process shared cache; the library-backed counterpart to the demo's bespoke Arc<Mutex<HashMap>> (which is not cataloged)"
+            "psa_role": "in-process shared cache; the library-backed counterpart to the demo's bespoke Arc<Mutex<HashMap>> (which is not cataloged)"
         },
         {
             "fn_name": "moka::future::Cache::get",
@@ -387,7 +387,7 @@
             "return_type": "Result<Response, Error>",
             "parameter_type": ["self"],
             "verified_via": "general-knowledge",
-            "taint_role": "Supabase/PostgREST client; the query (select/insert/update) is built on the Builder receiver, so execute is the store access point"
+            "psa_role": "Supabase/PostgREST client; the query (select/insert/update) is built on the Builder receiver, so execute is the store access point"
         },
         {
             "fn_name": "reqwest::RequestBuilder::send",
@@ -395,7 +395,7 @@
             "return_type": "Result<Response, reqwest::Error>",
             "parameter_type": ["self"],
             "verified_via": "ambient",
-            "taint_role": "catch-all for a data backend reached over raw HTTP (Firestore/Supabase REST, a REST API). NOTE: the LLM and AC catalogs also claim reqwest::send and are matched first (LLM, then AC, then data), so this entry is shadowed today; it becomes useful once URL/host-hint narrowing disambiguates the three, mirroring ac_hints.rs"
+            "psa_role": "catch-all for a data backend reached over raw HTTP (Firestore/Supabase REST, a REST API). NOTE: the LLM and AC catalogs also claim reqwest::send and are matched first (LLM, then AC, then data), so this entry is shadowed today; it becomes useful once URL/host-hint narrowing disambiguates the three, mirroring ac_hints.rs"
         }
     ],
 
@@ -406,7 +406,7 @@
             "resource_arg": 1,
             "resource_prefix": "pm",
             "verified_via": "lemmy-0.19.0-source",
-            "taint_role": "Reads a private message by id (operand 1, after the pool). On the report path this read is not dominated by a participant check, so a non-participant reading it is the GHSA-r64r cross-user leak. Matched by short-name PrivateMessage::read."
+            "psa_role": "Reads a private message by id (operand 1, after the pool). On the report path this read is not dominated by a participant check, so a non-participant reading it is the GHSA-r64r cross-user leak. Matched by short-name PrivateMessage::read."
         },
         {
             "fn_name": "lemmy_db_schema::source::private_message::PrivateMessage::create",
@@ -415,7 +415,7 @@
             "resource_expr": "{}.id",
             "resource_prefix": "pm",
             "verified_via": "lemmy-0.19.0-source",
-            "taint_role": "Creates a private message; the row id is generated and returned, so the resource instance id is read from the return value (`{}.id`). Establishes the sender as the owner of pm:<id>. Matched by short-name PrivateMessage::create."
+            "psa_role": "Creates a private message; the row id is generated and returned, so the resource instance id is read from the return value (`{}.id`). Establishes the sender as the owner of pm:<id>. Matched by short-name PrivateMessage::create."
         }
     ],
 
@@ -428,7 +428,7 @@
             "return_type": "Result<File, Error>",
             "parameter_type": ["P"],
             "verified_via": "dufs-ir",
-            "taint_role": "A file server's data store IS the filesystem: opening a file to serve its bytes is the leak-exposing read, and the file path (arg 0) is the resource. Short-name File::open also covers tokio::fs::file::File::open (dufs uses the tokio form). The cross-user leak is user B opening a path whose file user A created."
+            "psa_role": "A file server's data store IS the filesystem: opening a file to serve its bytes is the leak-exposing read, and the file path (arg 0) is the resource. Short-name File::open also covers tokio::fs::file::File::open (dufs uses the tokio form). The cross-user leak is user B opening a path whose file user A created."
         },
         {
             "fn_name": "std::fs::read_to_string",
@@ -438,7 +438,7 @@
             "return_type": "Result<String, Error>",
             "parameter_type": ["P"],
             "verified_via": "dufs-ir",
-            "taint_role": "Reads a whole file by path (arg 0). Covers tokio::fs::read_to_string by short-name."
+            "psa_role": "Reads a whole file by path (arg 0). Covers tokio::fs::read_to_string by short-name."
         },
         {
             "fn_name": "std::fs::read_dir",
@@ -448,7 +448,7 @@
             "return_type": "Result<ReadDir, Error>",
             "parameter_type": ["P"],
             "verified_via": "general-knowledge",
-            "taint_role": "Directory listing reads the names of entries under a path (arg 0); for a file server, listing another principal's directory is a cross-user read. Covers tokio::fs::read_dir by short-name."
+            "psa_role": "Directory listing reads the names of entries under a path (arg 0); for a file server, listing another principal's directory is a cross-user read. Covers tokio::fs::read_dir by short-name."
         },
         {
             "fn_name": "std::fs::File::create",
@@ -459,7 +459,7 @@
             "parameter_type": ["P"],
             "request_index": 0,
             "verified_via": "dufs-ir",
-            "taint_role": "Creating/truncating a file at a path (arg 0) is the upload write; the path is the written resource, so the uploading principal is seeded onto it. Covers tokio::fs::file::File::create by short-name."
+            "psa_role": "Creating/truncating a file at a path (arg 0) is the upload write; the path is the written resource, so the uploading principal is seeded onto it. Covers tokio::fs::file::File::create by short-name."
         },
         {
             "fn_name": "std::fs::OpenOptions::open",
@@ -470,7 +470,7 @@
             "parameter_type": ["self", "P"],
             "request_index": 1,
             "verified_via": "dufs-ir",
-            "taint_role": "The write/append upload path in dufs (OpenOptions::new().write(true)...open(path)); path is arg 1 after the OpenOptions receiver. CAVEAT: OpenOptions::open is also used read-only; cataloged as write because the file-server upload uses it, and a false write only widens the overlap set (sound, handed to dynamic)."
+            "psa_role": "The write/append upload path in dufs (OpenOptions::new().write(true)...open(path)); path is arg 1 after the OpenOptions receiver. CAVEAT: OpenOptions::open is also used read-only; cataloged as write because the file-server upload uses it, and a false write only widens the overlap set (sound, handed to dynamic)."
         },
         {
             "fn_name": "std::fs::rename",
@@ -481,7 +481,7 @@
             "parameter_type": ["P", "Q"],
             "request_index": 1,
             "verified_via": "dufs-ir",
-            "taint_role": "Move/rename writes to the destination path (arg 1). Covers tokio::fs::rename by short-name."
+            "psa_role": "Move/rename writes to the destination path (arg 1). Covers tokio::fs::rename by short-name."
         },
         {
             "fn_name": "std::fs::remove_file",
@@ -492,7 +492,7 @@
             "parameter_type": ["P"],
             "request_index": 0,
             "verified_via": "dufs-ir",
-            "taint_role": "Delete mutates the file at a path (arg 0). Covers tokio::fs::remove_file by short-name."
+            "psa_role": "Delete mutates the file at a path (arg 0). Covers tokio::fs::remove_file by short-name."
         },
         {
             "fn_name": "std::fs::remove_dir_all",
@@ -503,7 +503,7 @@
             "parameter_type": ["P"],
             "request_index": 0,
             "verified_via": "dufs-ir",
-            "taint_role": "Recursive directory delete mutates the subtree at a path (arg 0). Covers tokio::fs::remove_dir_all by short-name."
+            "psa_role": "Recursive directory delete mutates the subtree at a path (arg 0). Covers tokio::fs::remove_dir_all by short-name."
         }
     ]
 }

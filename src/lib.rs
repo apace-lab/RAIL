@@ -27,7 +27,9 @@ pub use crate::control_dep_graph::ControlDependenceGraph;
 pub use crate::control_flow_graph::{CFGNode, ControlFlowGraph};
 pub use crate::dominator_tree::{DominatorTree, PostDominatorTree};
 pub use crate::functions_by_type::FunctionsByType;
-pub use crate::pointer_assignment_graph::{detect_app_crate, PAEdge, PANode, PointerAssignmentGraph};
+pub use crate::pointer_assignment_graph::{
+    crate_of, detect_app_crate, in_app_workspace, PAEdge, PANode, PointerAssignmentGraph,
+};
 use llvm_ir::{Function, Module};
 use log::debug;
 use std::cell::{Ref, RefCell};

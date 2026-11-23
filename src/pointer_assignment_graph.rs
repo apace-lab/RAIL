@@ -789,10 +789,19 @@ impl<'m> PointerAssignmentGraph<'m> {
             return;
         }
 
+        // Workspace scope: seed not just the single app crate but every crate that
+        // shares its workspace prefix (lemmy_server also admits lemmy_db_schema,
+        // lemmy_api, ...). This is what reaches the orphan async bodies: an
+        // `#[async_trait]` DAO method boxes its body into a `{{closure}}` that is
+        // referenced only through a `dyn Future::poll` vtable, so it has no direct
+        // caller and is never visited from `main`. The closure's symbol lives in the
+        // data-access crate (e.g. lemmy_db_schema), so the single-crate filter
+        // dropped it. Seeding it as a Global root makes its body (and the diesel
+        // access inside it) visible to constraint discovery.
         let roots: Vec<String> = self
             .functions_by_name
             .keys()
-            .filter(|name| name.contains(app_crate) && !should_skip_function_body(name))
+            .filter(|name| in_app_workspace(app_crate, name) && !should_skip_function_body(name))
             .cloned()
             .collect();
 
@@ -4868,6 +4877,43 @@ pub(crate) fn parse_app_crate(mangled: &str) -> String {
     } else {
         String::new()
     }
+}
+
+/// Crate name from a function symbol, whether it is mangled (`_ZN<len><crate>..`)
+/// or already demangled (`<crate>::..` or `<T as <crate>::..>`). Returns "" when
+/// no crate token can be identified.
+pub fn crate_of(symbol: &str) -> String {
+    // Mangled form first.
+    let m = parse_app_crate(symbol);
+    if !m.is_empty() {
+        return m;
+    }
+    // Demangled form: skip leading sigils and an `as` qualifier, then read the
+    // first path identifier (the crate), stopping at `::`.
+    let s = symbol.trim_start_matches(|c| c == '<' || c == '&' || c == '(' || c == '*' || c == ' ');
+    let s = match s.find(" as ") {
+        Some(idx) => s[idx + 4..].trim_start_matches(|c| c == '<' || c == '&' || c == '(' || c == '*' || c == ' '),
+        None => s,
+    };
+    s.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect()
+}
+
+/// True when `name` belongs to the application workspace identified by `app_crate`:
+/// the app crate itself, or any crate sharing its workspace prefix (e.g. app crate
+/// `lemmy_server` also admits `lemmy_api`, `lemmy_db_schema`, `lemmy_db_views`).
+/// The caller handles the empty-`app_crate` case; this assumes a non-empty crate.
+pub fn in_app_workspace(app_crate: &str, name: &str) -> bool {
+    if name.contains(app_crate) {
+        return true;
+    }
+    let prefix = app_crate.split('_').next().unwrap_or(app_crate);
+    if prefix.len() >= 3 {
+        let c = crate_of(name);
+        if c == prefix || c.starts_with(&format!("{prefix}_")) {
+            return true;
+        }
+    }
+    false
 }
 
 /// compute indices for insertvalue/extractvalue (constant struct indices)
